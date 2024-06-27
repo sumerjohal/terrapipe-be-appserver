@@ -46,7 +46,9 @@ import json
 import s2sphere as s2
 import s2sphere
 from concurrent.futures import ThreadPoolExecutor
-
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import pyarrow as pa
 
 warnings.filterwarnings('ignore')
 
@@ -1185,76 +1187,83 @@ def get_level_5_tokens(level_9_tokens):
         print(f'level_5_tokens {level_5_tokens}')
     return level_5_tokens
 
+
+
 def getWeatherFromNLDAS(agstack_geoid, dtStr):
-    base_path = '/mnt/md1/NLDAS/PARQUET_S2/'
+    filePath = '/mnt/md1/NLDAS/PARQUET_S2/'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
-    MM_str = tok[1].zfill(2)
-    DD_str = tok[2].zfill(2)
+    MM_str = tok[1]
+    DD_str = tok[2]
     
-    paths = os.path.join(base_path, f's2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year={YYYY_str}/Month={MM_str}/Day={DD_str}')
-
-    print(f'paths {paths}')
-
-    try:
-        # Use os.scandir for potentially faster directory listing
-        with os.scandir(paths) as entries:
-            file_paths = [os.path.join(paths, entry.name) for entry in entries if entry.is_file()]
-    except FileNotFoundError:
-        raise FileNotFoundError(f"No files found in directory: {paths}")
-
-    if not file_paths:
-        raise FileNotFoundError("No files found in directory: {}".format(paths))
-    
+    # Construct file paths
+    list_of_files = os.listdir(filePath)
+    file_paths = [os.path.join(filePath, file) for file in list_of_files]
     configFile = '/home/user/terrapipe/config/11SKA/11SKA.json'
-    
+
+    # Load and validate the JSON file
     with open(configFile, "r") as jsonfile:
         fieldJSON = json.load(jsonfile)
         field_geoid = fieldJSON['geoid']
         field_wkt = fieldJSON['wkt']
 
+    # Validate if the geoid matches
     if agstack_geoid != field_geoid:
         raise ValueError("Geoid does not match the geoid in the JSON file.")
 
+    # Load the WKT and calculate centroid
     fieldPoly = wkt.loads(field_wkt)
     c = fieldPoly.centroid
-    lat, lon = c.y, c.x
+    lat = c.y
+    lon = c.x
 
-    lats, lons = [lat], [lon]
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons)
-    
-    # Define a generator expression to load each Parquet file
-    weather_df_list = (pd.read_parquet(file_path, engine='fastparquet') for file_path in file_paths)
+    lats = [lat]
+    lons = [lon]
     
     try:
-        # Concatenate all DataFrames at once
-        weather_df = pd.concat(weather_df_list, ignore_index=True)
-        float_columns = weather_df.select_dtypes(['float64']).columns
-        weather_df[float_columns] = weather_df[float_columns].astype('float32')
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L13_list, _ = get_s2_cellids_and_token_list(13, lats, lons)
+        print(f's2_index__L13_list---  {s2_index__L13_list}')
         
-        # Filter by s2_token_L9 first
-        filtered_df = weather_df[weather_df['s2_token_L9'].isin(s2_index__L9_list)]
+        # Read Parquet files directly
+        weather_df_list = [pd.read_parquet(file_path) for file_path in file_paths]
+        weather_df = pd.concat(weather_df_list)
+        print(f'weather_df----{weather_df}')
         
-        # If s2_token_L9 filtering is empty, try s2_token_L7
-        if filtered_df.empty:
-            level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-            if 's2_token_L7' in weather_df.columns:
-                filtered_df = weather_df[weather_df['s2_token_L7'].isin(level_7_tokens)]
-        
-        # If s2_token_L7 filtering is empty, try s2_token_L5
-        if filtered_df.empty:
-            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-            if 's2_token_L5' in weather_df.columns:
-                filtered_df = weather_df[weather_df['s2_token_L5'].isin(level_5_tokens)]
-                # Convert string columns to category dtype
-        cat_columns = filtered_df.select_dtypes(['object']).columns
-        filtered_df[cat_columns] = filtered_df[cat_columns].astype('category')
-        
-        # Convert float columns to float32
-
+        # Check if required columns exist
+        if 's2_token_L13' in weather_df.columns:
+            filtered_df = weather_df[weather_df['s2_token_L13'].isin(s2_index__L13_list)]
+            # If no data is found, try filtering with level 11 tokens
+            if filtered_df.empty:
+                level_11_tokens = get_level_11_tokens(s2_index__L13_list)
+                if 's2_token_L11' in weather_df.columns:
+                    filtered_df = weather_df[weather_df['s2_token_L11'].isin(level_11_tokens)]
+                    print(f'filtered_df11----{filtered_df}')
+            # If still no data, try filtering with level 9 tokens
+            if filtered_df.empty:
+                level_9_tokens = get_level_9_tokens(s2_index__L13_list)
+                if 's2_token_L9' in weather_df.columns:
+                    filtered_df = weather_df[weather_df['s2_token_L9'].isin(level_9_tokens)]
+                    print(f'filtered_df9----{filtered_df}')
+            # Convert timestamp column to datetime format
+            if 'timestamp' in filtered_df.columns:
+                filtered_df['timestamp'] = pd.to_datetime(filtered_df['timestamp'])
+                filtered_df['Year'] = filtered_df['timestamp'].dt.year
+                filtered_df['Month'] = filtered_df['timestamp'].dt.month
+                filtered_df['Day'] = filtered_df['timestamp'].dt.day
+                # Filter data by year, month, and day
+                filtered_df = filtered_df[(filtered_df['Year'] == int(YYYY_str)) & 
+                                          (filtered_df['Month'] == int(MM_str)) & 
+                                          (filtered_df['Day'] == int(DD_str))]
+                print(filtered_df)
+            else:
+                raise ValueError("Column 'timestamp' does not exist in the filtered DataFrame.")
+        else:
+            raise ValueError("Column 's2_token_L13' does not exist in the weather DataFrame.")
 
     except (FileNotFoundError, pd.errors.EmptyDataError, ValueError) as e:
         print("Error occurred:", e)
+        # Return static response
         return pd.DataFrame({
             "index": [],
             "latitude": [],
@@ -1279,200 +1288,155 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
             "SOTYP_surface": [],
             "TCDC_entireatmosphere": [],
             "PRES_maxwind": [],
-            "DSWRF_surface":[],
-            "DLWRF_surface":[],
-            "ULWRF_surface":[],
-            "PRES_maxwind":[],
+            "s2_tokens": [],
+            "s2_token_L3": [],
             "s2_token_L5": [],
             "s2_token_L7": [],
+            "s2_token_L8": [],
             "s2_token_L9": [],
+            "s2_token_L11": [],
+            "s2_token_L13": [],
+            "s2_token_L15": [],
+            "s2_token_L17": [],
+            "s2_token_L19": [],
+            "s2_token_L20": [],
             "timestamp": [],
             "Year": [],
-            "Month": []
+            "Month": [],
+            "Day": [],
+            "DSWRF_surface": [],
+            "DLWRF_surface": [],
+            "USWRF_surface": [],
+            "ULWRF_surface": []
         })
 
     return filtered_df
+    
+
+
 
 def getWeatherFromNCEP(agstack_geoid, dtStr):
-    base_path = '/mnt/md1/NCEP/PARQUET_S2/PARQUET_S2/'
+    base_path = '/mnt/md1/NCEP/PARQUETE_S2/'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
-    DD_str = tok[2].zfill(2)
+    DD_str = tok[2]
     
-    paths = os.path.join(base_path, f's2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year={YYYY_str}/Month={MM_str}/Day={DD_str}')
+        # Construct file paths
+    list_of_files = os.listdir(filePath)
+    file_paths = [os.path.join(filePath, file) for file in list_of_files]
+    configFile = '/home/user/terrapipe/config/11SKA/11SKA.json'
 
-
-    try:
-        # Use os.scandir for potentially faster directory listing
-        with os.scandir(paths) as entries:
-            file_paths = [os.path.join(paths, entry.name) for entry in entries if entry.is_file()]
-
-    except FileNotFoundError:
-        raise FileNotFoundError(f"No files found in directory: {paths}")
-
-    if not file_paths:
-        raise FileNotFoundError("No files found in directory: {}".format(paths))
-    
-    configFile = '/home/user/terrapipe/config/11SKA/11SKA.json'    
+    # Load and validate the JSON file
     with open(configFile, "r") as jsonfile:
         fieldJSON = json.load(jsonfile)
         field_geoid = fieldJSON['geoid']
         field_wkt = fieldJSON['wkt']
 
+    # Validate if the geoid matches
     if agstack_geoid != field_geoid:
         raise ValueError("Geoid does not match the geoid in the JSON file.")
 
+    # Load the WKT and calculate centroid
     fieldPoly = wkt.loads(field_wkt)
     c = fieldPoly.centroid
-    lat, lon = c.y, c.x
+    lat = c.y
+    lon = c.x
 
-    lats, lons = [lat], [lon]
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons)    
-    weather_df_list = [pd.read_parquet(file_path, engine='fastparquet') for file_path in file_paths]
+    lats = [lat]
+    lons = [lon]
+    
+    try:
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L13_list, _ = get_s2_cellids_and_token_list(13, lats, lons)
+        print(f's2_index__L13_list---  {s2_index__L13_list}')
+        
+        # Read Parquet files directly
+        weather_df_list = [pd.read_parquet(file_path) for file_path in file_paths]
+        weather_df = pd.concat(weather_df_list)
+        print(f'weather_df----{weather_df}')
+        
+        # Check if required columns exist
+        if 's2_token_L13' in weather_df.columns:
+            filtered_df = weather_df[weather_df['s2_token_L13'].isin(s2_index__L13_list)]
+            # If no data is found, try filtering with level 11 tokens
+            if filtered_df.empty:
+                level_11_tokens = get_level_11_tokens(s2_index__L13_list)
+                if 's2_token_L11' in weather_df.columns:
+                    filtered_df = weather_df[weather_df['s2_token_L11'].isin(level_11_tokens)]
+                    print(f'filtered_df11----{filtered_df}')
+            # If still no data, try filtering with level 9 tokens
+            if filtered_df.empty:
+                level_9_tokens = get_level_9_tokens(s2_index__L13_list)
+                if 's2_token_L9' in weather_df.columns:
+                    filtered_df = weather_df[weather_df['s2_token_L9'].isin(level_9_tokens)]
+                    print(f'filtered_df9----{filtered_df}')
+            # Convert timestamp column to datetime format
+            if 'timestamp' in filtered_df.columns:
+                filtered_df['timestamp'] = pd.to_datetime(filtered_df['timestamp'])
+                filtered_df['Year'] = filtered_df['timestamp'].dt.year
+                filtered_df['Month'] = filtered_df['timestamp'].dt.month
+                filtered_df['Day'] = filtered_df['timestamp'].dt.day
+                # Filter data by year, month, and day
+                filtered_df = filtered_df[(filtered_df['Year'] == int(YYYY_str)) & 
+                                          (filtered_df['Month'] == int(MM_str)) & 
+                                          (filtered_df['Day'] == int(DD_str))]
+                print(filtered_df)
+            else:
+                raise ValueError("Column 'timestamp' does not exist in the filtered DataFrame.")
+        else:
+            raise ValueError("Column 's2_token_L13' does not exist in the weather DataFrame.")
 
-    # Concatenate all DataFrames at once
-    weather_df = pd.concat(weather_df_list, ignore_index=True)
-    float_columns = weather_df.select_dtypes(['float64']).columns
-    weather_df[float_columns] = weather_df[float_columns].astype('float32')
-    cat_columns = weather_df.select_dtypes(['object']).columns
-    weather_df[cat_columns] = weather_df[cat_columns].astype('category')
-    
-    # Filter by s2_token_L9 first
-    filtered_df = weather_df[weather_df['s2_token_L9'].isin(s2_index__L9_list)]
-    
-    # If s2_token_L9 filtering is empty, try s2_token_L7
-    if filtered_df.empty:
-        level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-        if 's2_token_L7' in weather_df.columns:
-            filtered_df = weather_df[weather_df['s2_token_L7'].isin(level_7_tokens)]
-    
-    # If s2_token_L7 filtering is empty, try s2_token_L5
-    if filtered_df.empty:
-        level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-        if 's2_token_L5' in weather_df.columns:
-            filtered_df = weather_df[weather_df['s2_token_L5'].isin(level_5_tokens)]
-            # Convert string columns to category dtype
-  
+    except (FileNotFoundError, pd.errors.EmptyDataError, ValueError) as e:
+        print("Error occurred:", e)
+        # Return static response
+        return pd.DataFrame({
+            "index": [],
+            "latitude": [],
+            "longitude": [],
+            "time": [],
+            "PRMSL_meansealevel": [],
+            "GUST_surface": [],
+            "TSOIL_0M0D1mbelowground": [],
+            "SOILW_0M0D1mbelowground": [],
+            "TSOIL_0D1M0D4mbelowground": [],
+            "SOILW_0D1M0D4mbelowground": [],
+            "TSOIL_0D4M1mbelowground": [],
+            "SOILW_0D4M1mbelowground": [],
+            "TSOIL_1M2mbelowground": [],
+            "SOILW_1M2mbelowground": [],
+            "TMP_2maboveground": [],
+            "SPFH_2maboveground": [],
+            "DPT_2maboveground": [],
+            "RH_2maboveground": [],
+            "PRATE_surface": [],
+            "CRAIN_surface": [],
+            "SOTYP_surface": [],
+            "TCDC_entireatmosphere": [],
+            "PRES_maxwind": [],
+            "s2_tokens": [],
+            "s2_token_L3": [],
+            "s2_token_L5": [],
+            "s2_token_L7": [],
+            "s2_token_L8": [],
+            "s2_token_L9": [],
+            "s2_token_L11": [],
+            "s2_token_L13": [],
+            "s2_token_L15": [],
+            "s2_token_L17": [],
+            "s2_token_L19": [],
+            "s2_token_L20": [],
+            "timestamp": [],
+            "Year": [],
+            "Month": [],
+            "Day": [],
+            "DSWRF_surface": [],
+            "DLWRF_surface": [],
+            "USWRF_surface": [],
+            "ULWRF_surface": []
+        })
+
     return filtered_df
-    
-
-
-
-# def getWeatherFromNCEP(agstack_geoid, dtStr):
-#     base_path = '/mnt/md1/NCEP/PARQUET_S2/'
-#     tok = dtStr.split('-')
-#     YYYY_str = tok[0]
-#     MM_str = tok[1]
-#     DD_str = tok[2]
-    
-#     # Construct file paths
-#     # paths = os.path.join(base_path, f's2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year={YYYY_str}/Month={MM_str}/Day={DD_str}')
-#     paths = '/mnt/md1/NCEP/PARQUET_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/Month=06/Day=17/'
-#     print(f'paths {paths}')
-
-#     list_of_files = os.listdir(paths)
-
-#     if not list_of_files:
-#         raise FileNotFoundError("No files found in directory: {}".format(paths))
-#     file_paths = [os.path.join(paths, file) for file in list_of_files]
-#     configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
-    
-#     # Load and validate the JSON file
-#     with open(configFile, "r") as jsonfile:
-#         fieldJSON = json.load(jsonfile)
-#         field_geoid = fieldJSON['geoid']
-#         field_wkt = fieldJSON['wkt']
-
-#     # Validate if the geoid matches
-#     if agstack_geoid != field_geoid:                    
-#         raise ValueError("Geoid does not match the geoid in the JSON file.")
-
-#     # Load the WKT and calculate centroid
-#     fieldPoly = wkt.loads(field_wkt)
-#     c = fieldPoly.centroid
-#     lat = c.y
-#     lon = c.x
-
-#     lats = [lat]
-#     lons = [lon]
-#     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons)
-#     print(f's2_index__L9_list---  {s2_index__L9_list}')
-        
-#         # Read Parquet files directly
-   
-#     weather_df_list = [pd.read_parquet(file_path) for file_path in file_paths]
-#     print(f"weather_df----{weather_df_list}")
-#     try:
-#         # Get the list of S2 indices and CIDs for the data point
-#         weather_df = pd.concat(weather_df_list)
-        
-#         # Check if required columns exist
-        
-#         filtered_df = weather_df[weather_df['s2_token_L9'].isin(s2_index__L9_list)]
-#         # If no data is found, try filtering with level 11 tokens
-#         if filtered_df.empty:
-#             level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-#             if 's2_token_L7' in weather_df.columns:
-#                 filtered_df = weather_df[weather_df['s2_token_L7'].isin(level_7_tokens)]
-#                 print(f'filtered_df11----{filtered_df}')
-#         # If still no data, try filtering with level 9 tokens
-#         if filtered_df.empty:
-#             level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-#             if 's2_token_L5' in weather_df.columns:
-#                 filtered_df = weather_df[weather_df['s2_token_L5'].isin(level_5_tokens)]
-#                 print(f'filtered_df5----{filtered_df}')
-    
-#     except (FileNotFoundError, pd.errors.EmptyDataError, ValueError) as e:
-#         print("Error occurred:", e)
-#         # Return static response
-#         return pd.DataFrame({
-#             "index": [],
-#             "latitude": [],
-#             "longitude": [],
-#             "time": [],
-#             "PRMSL_meansealevel": [],
-#             "GUST_surface": [],
-#             "TSOIL_0M0D1mbelowground": [],
-#             "SOILW_0M0D1mbelowground": [],
-#             "TSOIL_0D1M0D4mbelowground": [],
-#             "SOILW_0D1M0D4mbelowground": [],
-#             "TSOIL_0D4M1mbelowground": [],
-#             "SOILW_0D4M1mbelowground": [],
-#             "TSOIL_1M2mbelowground": [],
-#             "SOILW_1M2mbelowground": [],
-#             "TMP_2maboveground": [],
-#             "SPFH_2maboveground": [],
-#             "DPT_2maboveground": [],
-#             "RH_2maboveground": [],
-#             "PRATE_surface": [],
-#             "CRAIN_surface": [],
-#             "SOTYP_surface": [],
-#             "TCDC_entireatmosphere": [],
-#             "PRES_maxwind": [],
-#             "s2_tokens": [],
-#             "s2_token_L3": [],
-#             "s2_token_L5": [],
-#             "s2_token_L7": [],
-#             "s2_token_L8": [],
-#             "s2_token_L9": [],
-#             "s2_token_L11": [],
-#             "s2_token_L13": [],
-#             "s2_token_L15": [],
-#             "s2_token_L17": [],
-#             "s2_token_L19": [],
-#             "s2_token_L20": [],
-#             "timestamp": [],
-#             "Year": [],
-#             "Month": [],
-#             "Day": [],
-#             "DSWRF_surface": [],
-#             "DLWRF_surface": [],
-#             "USWRF_surface": [],
-#             "ULWRF_surface": []
-#         })
-
-#     return filtered_df
 
 
 
@@ -2017,4 +1981,3 @@ def getNDVI():
         #print('Invalid Polygon')
         return 'Invalid Polygon'
 """
-
