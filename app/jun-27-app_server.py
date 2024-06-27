@@ -1196,9 +1196,6 @@ last_update_time = None
 cached_weather_df = pd.DataFrame()  # Placeholder for cached data
 last_reload_time = None
 
-base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
-base_path_ncep = '/mnt/md1/NCEP/PARQUET_S2/'
-
 class FileChangeHandler(FileSystemEventHandler):
     def __init__(self, reload_function):
         self.reload_function = reload_function
@@ -1257,43 +1254,6 @@ def reload_data(base_path,YYYY_str, MM_str, DD_str):
     except Exception as e:
         print(f"Error reloading data: {e}")
 
-
-def reload_data_nldas(YYYY_str, MM_str, DD_str):
-    global cached_weather_df, last_reload_time
-    
-    try:
-        start_time = time.time()
-        paths_nldas = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
-        all_files = [os.path.join(paths_nldas, f) for f in os.listdir(paths_nldas) if f.endswith('.parquet')]
-        
-        tables = [pq.read_table(file) for file in all_files]
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df = combined_table.to_pandas()
-        last_reload_time = time.time()
-        
-        print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
-        
-    except Exception as e:
-        print(f"Error reloading NLDAS data: {e}")
-
-def reload_data_ncep(YYYY_str, MM_str, DD_str):
-    global cached_weather_df, last_reload_time
-    
-    try:
-        start_time = time.time()
-        paths_ncep = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
-        all_files = [os.path.join(paths_ncep, f) for f in os.listdir(paths_ncep) if f.endswith('.parquet')]
-        
-        tables = [pq.read_table(file) for file in all_files]
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df = combined_table.to_pandas()
-        last_reload_time = time.time()
-        
-        print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
-        
-    except Exception as e:
-        print(f"Error reloading NLDAS data: {e}")
-
 def get_s2_cellids_and_token_list(resLevel, lats, lons):
 	min_level=resLevel
 	max_level=resLevel
@@ -1314,7 +1274,7 @@ def get_s2_cellids_and_token_list(resLevel, lats, lons):
 
 @app.route('/getDataFromNLDAS', methods=['GET'])
 def getWeatherFromNLDAS():
-
+    base_path = '/mnt/md1/NLDAS/PARQUETE_S2/'
     agstack_geoid = request.args.get('geoid')
     dtStr = request.args.get('date')
 
@@ -1343,7 +1303,7 @@ def getWeatherFromNLDAS():
     try:        
         # Check if data needs reloading based on last_reload_time
         if last_reload_time is None or time.time() - last_reload_time > 60 * 60 * 5:
-            reload_data_nldas(YYYY_str, MM_str, DD_str)
+            reload_data(base_path,YYYY_str, MM_str, DD_str)
         
         with open(configFile, "r") as jsonfile:
             fieldJSON = json.load(jsonfile)
@@ -1423,7 +1383,7 @@ def getWeatherFromNLDAS():
 
 @app.route('/getDataFromNCEP', methods=['GET'])
 def getWeatherFromNCEP():
-
+    base_path = '/mnt/md1/NCEP/PARQUET_S2/'
     configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
     agstack_geoid = request.args.get('geoid')
     dtStr = request.args.get('date')
@@ -1452,7 +1412,7 @@ def getWeatherFromNCEP():
     try:        
         # Check if data needs reloading based on last_reload_time
         if last_reload_time is None or time.time() - last_reload_time > 60 * 60 * 5:
-            reload_data_ncep(YYYY_str, MM_str, DD_str)
+            reload_data(base_path,YYYY_str, MM_str, DD_str)
         
         with open(configFile, "r") as jsonfile:
             fieldJSON = json.load(jsonfile)
@@ -1535,7 +1495,7 @@ def getWeatherFromNCEP():
             "ULWRF_surface": []
         })
 
-
+    return filtered_df
 
 
 
@@ -1992,8 +1952,6 @@ def home():
 if __name__ == '__main__':
     # extra_files = [updated_data_available_file,]
     extra_files = []
-    start_file_monitoring(base_path_nldas, lambda: reload_data_nldas("YYYY", "MM", "DD"))
-    start_file_monitoring(base_path_ncep, lambda: reload_data_ncep("YYYY", "MM", "DD")) 
     app.run(extra_files=extra_files)
 
 
