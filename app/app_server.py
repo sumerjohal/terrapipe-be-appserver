@@ -40,7 +40,7 @@ from shapely.geometry import mapping, Point, Polygon
 import pyarrow.dataset as ds
 import matplotlib.pyplot as plt
 import matplotlib
-import os
+from os import path, walk
 import pandas as pd
 import json
 import s2sphere as s2
@@ -59,8 +59,8 @@ warnings.filterwarnings('ignore')
 
 pa_filePath = '/mnt/md1/SENTINEL/PARQUET_S2_L20/'
 tileStr = '11SKA'
-fieldDataConfigRoot = '/home/user/terrapipe/config/'
-fieldDataOutputRoot = '/home/user/terrapipe/OUTPUT/'
+fieldDataConfigRoot = '/home/rnaura/terrapipe/config/'
+fieldDataOutputRoot = '/home/rnaura/terrapipe/OUTPUT/'
 
 geoidLookupFile = fieldDataConfigRoot+'geoid_lookup.json'
 
@@ -70,7 +70,7 @@ s2_max_resolution = resLevel
 maxResColName = 's2_index__L'+str(resLevel)
 
 app = Flask(__name__)
-
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 ################ DICTIONARIES
 property_dict = {
@@ -1173,7 +1173,7 @@ def get_level_7_tokens(level_9_tokens):
     level_7_tokens = []
     for token in level_9_tokens:
         cell_id = s2sphere.CellId.from_token(token)
-        parent_cell_id = cell_id.parent(11)  # Get parent cell at level 11
+        parent_cell_id = cell_id.parent(7)  # Get parent cell at level 11
         level_7_token = parent_cell_id.to_token()
         level_7_tokens.append(level_7_token)
         print(f'level_11_tokens {level_7_tokens}')
@@ -1183,7 +1183,7 @@ def get_level_5_tokens(level_9_tokens):
     level_5_tokens = []
     for token in level_9_tokens:
         cell_id = s2sphere.CellId.from_token(token)
-        parent_cell_id = cell_id.parent(9)  # 4 is the difference in levels between 13 and 9
+        parent_cell_id = cell_id.parent(5)  # 4 is the difference in levels between 13 and 9
         level_5_token = parent_cell_id.to_token()
         level_5_tokens.append(level_5_token)
         # print(f'level_13_token: {token}, level_9_token: {level_9_token}')
@@ -1193,10 +1193,18 @@ def get_level_5_tokens(level_9_tokens):
 
 
 last_update_time = None
-cached_weather_df = pd.DataFrame()  # Placeholder for cached data
+# cached_weather_df = pd.DataFrame()  # Placeholder for cached data
 last_reload_time = None
 
-base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
+cached_weather_df_nldas = pd.DataFrame()
+last_reload_time_nldas = None
+
+cached_weather_df_ncep = pd.DataFrame()
+last_reload_time_ncep = None
+
+
+
+base_path_nldas = '/mnt/md1/NLDAS/PARQUET_S2'
 base_path_ncep = '/mnt/md1/NCEP/PARQUET_S2/'
 
 class FileChangeHandler(FileSystemEventHandler):
@@ -1237,47 +1245,28 @@ def configure_reload_on_write(reload_function):
         observer.stop()
     observer.join()
 
-    
-def reload_data(base_path,YYYY_str, MM_str, DD_str):
-    global cached_weather_df, last_reload_time
-    
-    try:
-        start_time = time.time()
-        # paths = "/mnt/md1/NLDAS/PARQUETE_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/Month=06/Day=24"
-        paths = os.path.join(base_path, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
-        all_files = [os.path.join(paths, f) for f in os.listdir(paths) if f.endswith('.parquet')]
-        
-        tables = [pq.read_table(file) for file in all_files]
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df = combined_table.to_pandas()
-        last_reload_time = time.time()
-        
-        print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
-        
-    except Exception as e:
-        print(f"Error reloading data: {e}")
-
 
 def reload_data_nldas(YYYY_str, MM_str, DD_str):
-    global cached_weather_df, last_reload_time
+    global cached_weather_df_nldas, last_reload_time_nldas
     
     try:
         start_time = time.time()
-        paths_nldas = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
+        # paths_nldas = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
+        paths_nldas = "/mnt/md1/NLDAS/PARQUETE_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/Month=06/Day=27/"
         all_files = [os.path.join(paths_nldas, f) for f in os.listdir(paths_nldas) if f.endswith('.parquet')]
         
         tables = [pq.read_table(file) for file in all_files]
         combined_table = pa.concat_tables(tables)
-        cached_weather_df = combined_table.to_pandas()
-        last_reload_time = time.time()
+        cached_weather_df_nldas = combined_table.to_pandas()
+        last_reload_time_nldas = time.time()
         
         print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
         
     except Exception as e:
-        print(f"Error reloading NLDAS data: {e}")
+        pass
 
 def reload_data_ncep(YYYY_str, MM_str, DD_str):
-    global cached_weather_df, last_reload_time
+    global cached_weather_df_ncep, last_reload_time_ncep
     
     try:
         start_time = time.time()
@@ -1286,8 +1275,8 @@ def reload_data_ncep(YYYY_str, MM_str, DD_str):
         
         tables = [pq.read_table(file) for file in all_files]
         combined_table = pa.concat_tables(tables)
-        cached_weather_df = combined_table.to_pandas()
-        last_reload_time = time.time()
+        cached_weather_df_ncep = combined_table.to_pandas()
+        last_reload_time_ncep = time.time()
         
         print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
         
@@ -1336,51 +1325,48 @@ def getWeatherFromNLDAS():
     c = fieldPoly.centroid
     lat = c.y
     lon = c.x
-    global cached_weather_df, last_reload_time
+    global cached_weather_df_nldas, last_reload_time_nldas
     
     start_time_total = time.time()
-    
-    try:        
-        # Check if data needs reloading based on last_reload_time
-        if last_reload_time is None or time.time() - last_reload_time > 60 * 60 * 5:
-            reload_data_nldas(YYYY_str, MM_str, DD_str)
-        
-        with open(configFile, "r") as jsonfile:
-            fieldJSON = json.load(jsonfile)
-            field_geoid = fieldJSON['geoid']
-            field_wkt = fieldJSON['wkt']
-        
-        lats, lons = [lat], [lon]
-        s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons)
-        
-        # Filter DataFrame by s2_token_L9 values
-        if 's2_token_L9' in cached_weather_df.columns:
-            weather_df = cached_weather_df[cached_weather_df['s2_token_L9'].isin(s2_index__L9_list)]
-        else:
-            weather_df = pd.DataFrame()
-                # Check if required columns exist
-    
-        if weather_df.empty:
-            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-            weather_df = weather_df[weather_df['s2_token_L5'].isin(level_5_tokens)]
+    if last_reload_time_nldas is None or time.time() - last_reload_time_nldas > 60 * 5:
+        reload_data_nldas(YYYY_str, MM_str, DD_str)   
 
-        # If still no data, try filtering with level 9 tokens
-        if weather_df.empty:
-            level_9_tokens = get_level_9_tokens(s2_index__L9_list)
-            weather_df = weather_df[weather_df['s2_token_L7'].isin(level_9_tokens)]
+    # Check if data needs reloading based on last_reload_time
+    with open(configFile, "r") as jsonfile:
+        fieldJSON = json.load(jsonfile)
+        field_geoid = fieldJSON['geoid']
+        field_wkt = fieldJSON['wkt']
         
+    lats, lons = [lat], [lon]
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
+    
+    if not cached_weather_df_nldas.empty:
+        print('step1')
+        # Filter DataFrame by s2_token_L9 values
+        if 's2_token_L9' in cached_weather_df_nldas.columns and not cached_weather_df_nldas.empty:
+            cached_weather_df_nldas = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L9'].isin(s2_index__L9_list)]
+        print('step2')
+            # Check if required columns exist
+    
+        if not cached_weather_df_nldas.empty:
+            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
+            weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L5'].isin(level_5_tokens)]
+        print('step3')
+        # If still no data, try filtering with level 9 tokens
+        if not cached_weather_df_nldas.empty:
+            level_7_tokens = get_level_7_tokens(s2_index__L9_list)
+            weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L7'].isin(level_7_tokens)]
+        print('step4')
         # Calculate total request handling time
         end_time_total = time.time()
         total_duration = end_time_total - start_time_total
         
         # Print durations to screen
         print(f"Total request handling time: {total_duration:.4f} seconds")
-        return jsonify(weather_df.to_dict(orient='records'))
 
-    except (FileNotFoundError, pd.errors.EmptyDataError, ValueError) as e:
-        print("Error occurred:", e)
-        # Return static response
-        return pd.DataFrame({
+        
+    else:
+        weather_df = pd.DataFrame({
             "index": [],
             "latitude": [],
             "longitude": [],
@@ -1417,9 +1403,10 @@ def getWeatherFromNLDAS():
             "USWRF_surface": [],
             "ULWRF_surface": []
         })
+    
 
-    return weather_df    
-
+    return weather_df.to_json(orient='columns')
+    
 
 @app.route('/getDataFromNCEP', methods=['GET'])
 def getWeatherFromNCEP():
@@ -1445,51 +1432,41 @@ def getWeatherFromNCEP():
     c = fieldPoly.centroid
     lat = c.y
     lon = c.x
-    global cached_weather_df, last_reload_time
+    global cached_weather_df_ncep, last_reload_time_ncep
     
-    start_time_total = time.time()
-    
-    try:        
-        # Check if data needs reloading based on last_reload_time
-        if last_reload_time is None or time.time() - last_reload_time > 60 * 60 * 5:
-            reload_data_ncep(YYYY_str, MM_str, DD_str)
-        
-        with open(configFile, "r") as jsonfile:
-            fieldJSON = json.load(jsonfile)
-            field_geoid = fieldJSON['geoid']
-            field_wkt = fieldJSON['wkt']
-        
-        lats, lons = [lat], [lon]
-        s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons)
-        
-        # Filter DataFrame by s2_token_L9 values
-        
-        if 's2_token_L9' in cached_weather_df.columns:
-            weather_df = cached_weather_df[cached_weather_df['s2_token_L9'].isin(s2_index__L9_list)]
-        else:
-            weather_df = pd.DataFrame()
-                # Check if required columns exist
-    
-        if weather_df.empty:
-            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-            weather_df = weather_df[weather_df['s2_token_L5'].isin(level_5_tokens)]
+    lats, lons = [lat], [lon]
 
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
+
+    start_time_total = time.time()
+
+    if last_reload_time_ncep is None or time.time() - last_reload_time_ncep > 60 * 5:
+        reload_data_ncep(YYYY_str, MM_str, DD_str)   
+    
+    if not cached_weather_df_ncep.empty:
+        # Check if data needs reloading based on last_reload_time
+        if 's2_token_L9' in cached_weather_df_ncep.columns and not cached_weather_df_ncep.empty:
+            cached_weather_df_ncep = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L9'].isin(s2_index__L9_list)]
+        print('step2')
+            # Check if required columns exist
+    
+        if not cached_weather_df_ncep.empty:
+            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
+            weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L5'].isin(level_5_tokens)]
+        print('step3')
         # If still no data, try filtering with level 9 tokens
-        if weather_df.empty:
-            level_9_tokens = get_level_9_tokens(s2_index__L9_list)
-            weather_df = weather_df[weather_df['s2_token_L7'].isin(level_9_tokens)]
-        
+        if not cached_weather_df_ncep.empty:
+            level_7_tokens = get_level_7_tokens(s2_index__L9_list)
+            weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L7'].isin(level_7_tokens)]
+        print('step4')
         # Calculate total request handling time
         end_time_total = time.time()
         total_duration = end_time_total - start_time_total
-        
         # Print durations to screen
         print(f"Total request handling time: {total_duration:.4f} seconds")
-        return jsonify(weather_df.to_dict(orient='records'))
-    except (FileNotFoundError, pd.errors.EmptyDataError, ValueError) as e:
-        print("Error occurred:", e)
-        # Return static response
-        return pd.DataFrame({
+
+    else:
+        weather_df = pd.DataFrame({
             "index": [],
             "latitude": [],
             "longitude": [],
@@ -1513,18 +1490,10 @@ def getWeatherFromNCEP():
             "SOTYP_surface": [],
             "TCDC_entireatmosphere": [],
             "PRES_maxwind": [],
-            "s2_tokens": [],
-            "s2_token_L3": [],
             "s2_token_L5": [],
             "s2_token_L7": [],
             "s2_token_L8": [],
             "s2_token_L9": [],
-            "s2_token_L11": [],
-            "s2_token_L13": [],
-            "s2_token_L15": [],
-            "s2_token_L17": [],
-            "s2_token_L19": [],
-            "s2_token_L20": [],
             "timestamp": [],
             "Year": [],
             "Month": [],
@@ -1534,6 +1503,11 @@ def getWeatherFromNCEP():
             "USWRF_surface": [],
             "ULWRF_surface": []
         })
+    
+
+    return weather_df.to_json(orient='columns')
+
+    
 
 
 
@@ -1989,12 +1963,23 @@ def home():
 
 #     return matchDict
 
+# Directory watching and hot-reloading setup
+extra_dirs = [base_path_nldas, base_path_ncep]
+extra_files = extra_dirs[:]
+
+for extra_dir in extra_dirs:
+    for dirname, dirs, files in walk(extra_dir):
+        for filename in files:
+            file_path = path.join(dirname, filename)
+            if path.isfile(file_path):
+                extra_files.append(file_path)
+
 if __name__ == '__main__':
     # extra_files = [updated_data_available_file,]
     extra_files = []
-    start_file_monitoring(base_path_nldas, lambda: reload_data_nldas("YYYY", "MM", "DD"))
-    start_file_monitoring(base_path_ncep, lambda: reload_data_ncep("YYYY", "MM", "DD")) 
-    app.run(extra_files=extra_files)
+    start_file_monitoring(base_path_ncep, lambda: reload_data_nldas("YYYY", "MM", "DD"))
+    start_file_monitoring(base_path_nldas, lambda: reload_data_ncep("YYYY", "MM", "DD")) 
+    app.run(debug=False, extra_files=extra_files)
 
 
 
