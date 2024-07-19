@@ -49,6 +49,12 @@ from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import pyarrow as pa
+from s2sphere import CellId
+import threading
+import logging
+
+
+
 
 warnings.filterwarnings('ignore')
 
@@ -1204,7 +1210,7 @@ last_reload_time_ncep = None
 
 
 
-base_path_nldas = '/mnt/md1/NLDAS/PARQUET_S2'
+base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
 base_path_ncep = '/mnt/md1/NCEP/PARQUET_S2/'
 
 class FileChangeHandler(FileSystemEventHandler):
@@ -1230,30 +1236,17 @@ def start_file_monitoring(path, reload_function):
     observer_thread.start()
     print(f"Started monitoring {path} for changes")
 
-def configure_reload_on_write(reload_function):
-    event_handler = FileChangeHandler(reload_function)
-    observer = Observer()
-    observer.schedule(event_handler, base_path, recursive=True)
-    observer.start()
-    print(f"Started monitoring {base_path} for changes")
-
-    # Ensure observer runs indefinitely in the background
-    try:
-        while True:
-            observer.join(1)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
-
-
-def reload_data_nldas(YYYY_str, MM_str, DD_str):
+def reload_data_nldas(YYYY_str, MM_str):
     global cached_weather_df_nldas, last_reload_time_nldas
-    
     try:
         start_time = time.time()
-        # paths_nldas = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
-        paths_nldas = "/mnt/md1/NLDAS/PARQUETE_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/Month=06/Day=27/"
-        all_files = [os.path.join(paths_nldas, f) for f in os.listdir(paths_nldas) if f.endswith('.parquet')]
+        month_path = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
+        
+        all_files = []
+        for day_dir in os.listdir(month_path):
+            day_path = os.path.join(month_path, day_dir)
+            if os.path.isdir(day_path):
+                all_files.extend([os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')])
         
         tables = [pq.read_table(file) for file in all_files]
         combined_table = pa.concat_tables(tables)
@@ -1261,17 +1254,21 @@ def reload_data_nldas(YYYY_str, MM_str, DD_str):
         last_reload_time_nldas = time.time()
         
         print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
-        
     except Exception as e:
-        pass
+        print(f"Failed to reload data: {e}")
 
-def reload_data_ncep(YYYY_str, MM_str, DD_str):
+
+def reload_data_ncep(YYYY_str, MM_str):
     global cached_weather_df_ncep, last_reload_time_ncep
-    
     try:
         start_time = time.time()
-        paths_ncep = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}', f'Day={DD_str}')
-        all_files = [os.path.join(paths_ncep, f) for f in os.listdir(paths_ncep) if f.endswith('.parquet')]
+        month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
+        
+        all_files = []
+        for day_dir in os.listdir(month_path):
+            day_path = os.path.join(month_path, day_dir)
+            if os.path.isdir(day_path):
+                all_files.extend([os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')])
         
         tables = [pq.read_table(file) for file in all_files]
         combined_table = pa.concat_tables(tables)
@@ -1279,9 +1276,8 @@ def reload_data_ncep(YYYY_str, MM_str, DD_str):
         last_reload_time_ncep = time.time()
         
         print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
-        
     except Exception as e:
-        print(f"Error reloading NLDAS data: {e}")
+        print(f"Failed to reload data: {e}")
 
 def get_s2_cellids_and_token_list(resLevel, lats, lons):
 	min_level=resLevel
@@ -1301,19 +1297,27 @@ def get_s2_cellids_and_token_list(resLevel, lats, lons):
 		s2_token_list.append(cellid.to_token())
 	return s2_token_list, cids
 
-@app.route('/getDataFromNLDAS', methods=['GET'])
-def getWeatherFromNLDAS():
+def decode_geoid_to_coordinates(geoid):
+    cell_id = int(geoid, 16)
 
-    agstack_geoid = request.args.get('geoid')
-    dtStr = request.args.get('date')
+    # Get the cell object
+    cell = CellId(cell_id).to_lat_lng()
 
+    # Extract latitude and longitude
+    latitude = cell.lat().degrees
+    longitude = cell.lng().degrees
+
+    return latitude, longitude
+
+def getWeatherFromNLDAS(dtStr, agstack_geoid):
+    configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
-
-    configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
-
+    print('YYYY_str---',YYYY_str)
+    print('MM_str---',MM_str)
+    print('day---',DD_str)
     # Load and validate the JSON file
     with open(configFile, "r") as jsonfile:
         fieldJSON = json.load(jsonfile)
@@ -1327,47 +1331,51 @@ def getWeatherFromNLDAS():
     lon = c.x
     global cached_weather_df_nldas, last_reload_time_nldas
     
-    start_time_total = time.time()
-    if last_reload_time_nldas is None or time.time() - last_reload_time_nldas > 60 * 5:
-        reload_data_nldas(YYYY_str, MM_str, DD_str)   
-
-    # Check if data needs reloading based on last_reload_time
-    with open(configFile, "r") as jsonfile:
-        fieldJSON = json.load(jsonfile)
-        field_geoid = fieldJSON['geoid']
-        field_wkt = fieldJSON['wkt']
-        
     lats, lons = [lat], [lon]
     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
+
+    start_time_total = time.time()
+
+    if last_reload_time_nldas is None or time.time() - last_reload_time_nldas > 60 * 60* 5:
+        reload_data_nldas(YYYY_str, MM_str)   
     
+    weather_df_filtered = pd.DataFrame()
     if not cached_weather_df_nldas.empty:
-        print('step1')
-        # Filter DataFrame by s2_token_L9 values
+
+        # Check if data needs reloading based on last_reload_time
         if 's2_token_L9' in cached_weather_df_nldas.columns and not cached_weather_df_nldas.empty:
             cached_weather_df_nldas = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L9'].isin(s2_index__L9_list)]
-        print('step2')
-            # Check if required columns exist
-    
+        
         if not cached_weather_df_nldas.empty:
             level_5_tokens = get_level_5_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L5'].isin(level_5_tokens)]
-        print('step3')
-        # If still no data, try filtering with level 9 tokens
+        
         if not cached_weather_df_nldas.empty:
             level_7_tokens = get_level_7_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L7'].isin(level_7_tokens)]
-        print('step4')
-        # Calculate total request handling time
+        
+        try:
+            weather_df['Year'] = weather_df['Year'].astype(int)
+            weather_df['Month'] = weather_df['Month'].astype(int)
+            weather_df['Day'] = weather_df['Day'].astype(int)
+            
+            weather_df_filtered = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
+                                             (weather_df['Month'] == int(MM_str)) & 
+                                             (weather_df['Day'] == int(DD_str))]
+            
+            print("After filtering:")
+            print(weather_df_filtered.head())
+            
+        except KeyError as e:
+            print(f"KeyError: {e}")
+            # weather_df_filtered = pd.DataFrame(columns=weather_df.columns)  # Empty DataFrame with correct columns
+        
         end_time_total = time.time()
         total_duration = end_time_total - start_time_total
-        
-        # Print durations to screen
         print(f"Total request handling time: {total_duration:.4f} seconds")
 
-        
     else:
-        weather_df = pd.DataFrame({
-            "index": [],
+        weather_df_filtered = pd.DataFrame({
             "latitude": [],
             "longitude": [],
             "time": [],
@@ -1389,38 +1397,30 @@ def getWeatherFromNLDAS():
             "CRAIN_surface": [],
             "SOTYP_surface": [],
             "TCDC_entireatmosphere": [],
-            "PRES_maxwind": [],
-            "s2_token_L5": [],
-            "s2_token_L7": [],
-            "s2_token_L8": [],
-            "s2_token_L9": [],
-            "timestamp": [],
-            "Year": [],
-            "Month": [],
-            "Day": [],
             "DSWRF_surface": [],
             "DLWRF_surface": [],
             "USWRF_surface": [],
-            "ULWRF_surface": []
+            "ULWRF_surface": [],
+            "PRES_maxwind": [],
+            "s2_token_L5": [],
+            "s2_token_L7": [],
+            "s2_token_L9": [],
+            "Year": [],
+            "Month": [],
+            "Day": [],
+            "timestamp": []
         })
     
-
-    return weather_df.to_json(orient='columns')
+    return weather_df_filtered
     
 
-@app.route('/getDataFromNCEP', methods=['GET'])
-def getWeatherFromNCEP():
-
+def getWeatherFromNCEP(dtStr, agstack_geoid):
     configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
-    agstack_geoid = request.args.get('geoid')
-    dtStr = request.args.get('date')
-
-
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
-
+    print('day---',DD_str)
     # Load and validate the JSON file
     with open(configFile, "r") as jsonfile:
         fieldJSON = json.load(jsonfile)
@@ -1435,39 +1435,50 @@ def getWeatherFromNCEP():
     global cached_weather_df_ncep, last_reload_time_ncep
     
     lats, lons = [lat], [lon]
-
     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
 
     start_time_total = time.time()
 
-    if last_reload_time_ncep is None or time.time() - last_reload_time_ncep > 60 * 5:
-        reload_data_ncep(YYYY_str, MM_str, DD_str)   
+    if last_reload_time_ncep is None or time.time() - last_reload_time_ncep > 60 * 60* 5:
+        reload_data_ncep(YYYY_str, MM_str)   
     
+    weather_df_filtered = pd.DataFrame()
     if not cached_weather_df_ncep.empty:
+
         # Check if data needs reloading based on last_reload_time
         if 's2_token_L9' in cached_weather_df_ncep.columns and not cached_weather_df_ncep.empty:
             cached_weather_df_ncep = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L9'].isin(s2_index__L9_list)]
-        print('step2')
-            # Check if required columns exist
-    
+        
         if not cached_weather_df_ncep.empty:
             level_5_tokens = get_level_5_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L5'].isin(level_5_tokens)]
-        print('step3')
-        # If still no data, try filtering with level 9 tokens
+        
         if not cached_weather_df_ncep.empty:
             level_7_tokens = get_level_7_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L7'].isin(level_7_tokens)]
-        print('step4')
-        # Calculate total request handling time
+        
+        try:
+            weather_df['Year'] = weather_df['Year'].astype(int)
+            weather_df['Month'] = weather_df['Month'].astype(int)
+            weather_df['Day'] = weather_df['Day'].astype(int)
+            
+            weather_df_filtered = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
+                                             (weather_df['Month'] == int(MM_str)) & 
+                                             (weather_df['Day'] == int(DD_str))]
+            
+            print("After filtering:")
+            print(weather_df_filtered.head())
+            
+        except KeyError as e:
+            print(f"KeyError: {e}")
+            weather_df_filtered = pd.DataFrame(columns=weather_df.columns)  # Empty DataFrame with correct columns
+        
         end_time_total = time.time()
         total_duration = end_time_total - start_time_total
-        # Print durations to screen
         print(f"Total request handling time: {total_duration:.4f} seconds")
 
     else:
-        weather_df = pd.DataFrame({
-            "index": [],
+        weather_df_filtered = pd.DataFrame({
             "latitude": [],
             "longitude": [],
             "time": [],
@@ -1489,32 +1500,21 @@ def getWeatherFromNCEP():
             "CRAIN_surface": [],
             "SOTYP_surface": [],
             "TCDC_entireatmosphere": [],
-            "PRES_maxwind": [],
-            "s2_token_L5": [],
-            "s2_token_L7": [],
-            "s2_token_L8": [],
-            "s2_token_L9": [],
-            "timestamp": [],
-            "Year": [],
-            "Month": [],
-            "Day": [],
             "DSWRF_surface": [],
             "DLWRF_surface": [],
             "USWRF_surface": [],
-            "ULWRF_surface": []
+            "ULWRF_surface": [],
+            "PRES_maxwind": [],
+            "s2_token_L5": [],
+            "s2_token_L7": [],
+            "s2_token_L9": [],
+            "Year": [],
+            "Month": [],
+            "Day": [],
+            "timestamp": []
         })
     
-
-    return weather_df.to_json(orient='columns')
-
-    
-
-
-
-
-
-
-
+    return weather_df_filtered
 
 # def getWeatherFromNLDAS(agstack_geoid, dtStr):
 #     filePath = '/mnt/md1/NLDAS/PARQUET_S2/'
@@ -1901,27 +1901,27 @@ def getWeatherFromNCEP():
 @app.route('/')
 #def hello_world():
  #   return 'Hello World!'
-# @app.route('/getDataFromNLDAS')
-# def getNLDASData():
-#     geoid = request.args['geoid']
-#     # s2_token = ["8094c20c","8094e9e4"]
-#     date = request.args.get('date', '')
-#     weather_df = getWeatherFromNLDAS(geoid,date)
-#     weather_df.reset_index(inplace=True)
-#     # Convert DataFrame to JSON
-#     json_data = weather_df.to_json(orient='columns')
-#     return json_data
+@app.route('/getDataFromNLDAS')
+def getNLDASData():
+    geoid = request.args['geoid']
+    # s2_token = ["8094c20c","8094e9e4"]
+    date = request.args.get('date', '')
+    weather_df = getWeatherFromNLDAS(date,geoid)
+    weather_df.reset_index(inplace=True)
+    # Convert DataFrame to JSON
+    json_data = weather_df.to_json(orient='records')
+    return json_data
 
-# @app.route('/getDataFromNCEP')
-# def getNCEPWeatherData():
-#     geoid = request.args['geoid']
-#     # date = request.args['date','']
-#     date = request.args.get('date', '')
+@app.route('/getDataFromNCEP')
+def getNCEPWeatherData():
+    geoid = request.args['geoid']
+    # date = request.args['date','']
+    date = request.args.get('date', '')
 
-#     weather_df = getWeatherFromNCEP(geoid,date)
-#     weather_df.reset_index(inplace=True)
-#     json_data = weather_df.to_json(orient='columns')
-#     return json_data
+    weather_df = getWeatherFromNCEP(date,geoid)
+    weather_df.reset_index(inplace=True)
+    json_data = weather_df.to_json(orient='records')
+    return json_data
 
 
 @app.route('/')
@@ -1977,8 +1977,11 @@ for extra_dir in extra_dirs:
 if __name__ == '__main__':
     # extra_files = [updated_data_available_file,]
     extra_files = []
-    start_file_monitoring(base_path_ncep, lambda: reload_data_nldas("YYYY", "MM", "DD"))
-    start_file_monitoring(base_path_nldas, lambda: reload_data_ncep("YYYY", "MM", "DD")) 
+    YYYY_str = '2024'
+    MM_str = '07'
+    start_file_monitoring(os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9'), lambda: reload_data_nldas(YYYY_str, MM_str))
+
+    start_file_monitoring(os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9'), lambda: reload_data_ncep(YYYY_str, MM_str))
     app.run(debug=False, extra_files=extra_files)
 
 
