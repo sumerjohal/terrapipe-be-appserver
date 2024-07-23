@@ -52,7 +52,8 @@ import pyarrow as pa
 from s2sphere import CellId
 import threading
 import logging
-
+from s2sphere import CellId, Cell, LatLng
+import shapely.geometry
 
 
 
@@ -1309,15 +1310,80 @@ def decode_geoid_to_coordinates(geoid):
 
     return latitude, longitude
 
+
+def fetch_cords(geoid):
+    # geoid = 'ff93ad2470125dfe0f21b7b857140c94efa635c8b6f25104419e88129db9f682'
+
+    # Convert the geoid to an S2CellId
+    cell_id = s2sphere.CellId.from_token(geoid)
+
+    # Get the S2Cell from the CellId
+    cell = s2sphere.Cell(cell_id)
+
+    # Get the vertices of the cell
+    vertices = []
+    for i in range(4):
+        vertex = cell.get_vertex(i)
+        latlng = s2sphere.LatLng.from_point(vertex)
+        vertices.append((latlng.lng().degrees, latlng.lat().degrees))
+
+    # Create a polygon from the vertices
+    polygon = Polygon(vertices)
+
+    # Convert the polygon to WKT
+    wkt = polygon.wkt
+
+    # print("WKT representation of the geoid:")
+    # print(wkt)
+
+    # Calculate the center of the cell
+    center = cell.get_center()
+    center_latlng = s2sphere.LatLng.from_point(center)
+    center_lat = center_latlng.lat().degrees
+    center_lng = center_latlng.lng().degrees
+
+    # print("\nCenter of the geoid:")
+    # print(f"Latitude: {center_lat}, Longitude: {center_lng}")
+    return center_lat ,center_lng
+
+
+def get_wkt_polygon_from_geoid(geoid):
+    """
+    fetch the polygons coordniates from geoid
+
+    :param geoid: The geoid to convert.
+    :return: Coordinates.
+    """
+
+    url = f"https://api-ar.agstack.org/fetch-field/{geoid}"
+
+    response = requests.get(url)
+    data = response.json()
+    if response.status_code == 200:
+        if 'Geo JSON' in data and 'geometry' in data['Geo JSON']:
+            coordinates = data['Geo JSON']['geometry']['coordinates']
+            flattened_coordinates = [coord for sublist in coordinates for coord in sublist]
+            lats = [coord[1] for coord in flattened_coordinates]
+            lons = [coord[0] for coord in flattened_coordinates]
+            return lats , lons
+    else:
+        return [],[]
+
+
 def getWeatherFromNLDAS(dtStr, agstack_geoid):
+    
+    """    
+    This API filters data from a PARQUET file based on S2 tokens and date. It retrieves polygons 
+    from the asset registry and fetches the S2 tokens according to the specified level and polygons.
+    params: date string , Geoid
+    """
+
     configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
-    print('YYYY_str---',YYYY_str)
-    print('MM_str---',MM_str)
-    print('day---',DD_str)
+
     # Load and validate the JSON file
     with open(configFile, "r") as jsonfile:
         fieldJSON = json.load(jsonfile)
@@ -1331,6 +1397,8 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
     lon = c.x
     global cached_weather_df_nldas, last_reload_time_nldas
     
+    
+
     lats, lons = [lat], [lon]
     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
 
@@ -1415,9 +1483,16 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
     
 
 def getWeatherFromNCEP(dtStr, agstack_geoid):
+    """
+    This API filters data from a PARQUET file based on S2 tokens and date. It retrieves polygons 
+    from the asset registry and fetches the S2 tokens according to the specified level and polygons.
+    params: date string , Geoid
+    
+    """
     configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
+    
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
     print('day---',DD_str)
@@ -1428,34 +1503,55 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
         field_wkt = fieldJSON['wkt']
 
     # Load the WKT and calculate centroid
-    fieldPoly = wkt.loads(field_wkt)
-    c = fieldPoly.centroid
-    lat = c.y
-    lon = c.x
-    global cached_weather_df_ncep, last_reload_time_ncep
+    # fieldPoly = wkt.loads(field_wkt)
+    # c = fieldPoly.centroid
+    # lat = c.y
+    # lon = c.x
+        # Get WKT polygon dynamically
+    # lats, lons = get_wkt_polygon_from_geoid(agstack_geoid)
+    wkt = fetchWKT(agstack_geoid)
+    lat_lon_pairs = extractLatLon(wkt)
+    lats = []
+    lons = []
+    for  lat , lon in lat_lon_pairs:
+        lats.append(lat)
+        lons.append(lon)
     
-    lats, lons = [lat], [lon]
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
+    # fieldPoly = shapely.wkt.loads(wkt_polygon)
+    # c = fieldPoly.centroid
+    # lat = c.y
+    # lon = c.x
 
+    print(agstack_geoid)
+
+    global cached_weather_df_ncep, last_reload_time_ncep
+
+
+    # lats, lons = [lat], [lon]
+  
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
+    print(s2_index__L9_list)
     start_time_total = time.time()
 
     if last_reload_time_ncep is None or time.time() - last_reload_time_ncep > 60 * 60* 5:
         reload_data_ncep(YYYY_str, MM_str)   
     
     weather_df_filtered = pd.DataFrame()
+    weather_df = pd.DataFrame()
+
     if not cached_weather_df_ncep.empty:
 
         # Check if data needs reloading based on last_reload_time
         if 's2_token_L9' in cached_weather_df_ncep.columns and not cached_weather_df_ncep.empty:
-            cached_weather_df_ncep = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L9'].isin(s2_index__L9_list)]
-        
+            weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L9'].isin(s2_index__L9_list)]
         if not cached_weather_df_ncep.empty:
             level_5_tokens = get_level_5_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L5'].isin(level_5_tokens)]
-        
+
         if not cached_weather_df_ncep.empty:
             level_7_tokens = get_level_7_tokens(s2_index__L9_list)
             weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L7'].isin(level_7_tokens)]
+
         
         try:
             weather_df['Year'] = weather_df['Year'].astype(int)
@@ -1465,10 +1561,7 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
             weather_df_filtered = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
                                              (weather_df['Month'] == int(MM_str)) & 
                                              (weather_df['Day'] == int(DD_str))]
-            
-            print("After filtering:")
-            print(weather_df_filtered.head())
-            
+
         except KeyError as e:
             print(f"KeyError: {e}")
             weather_df_filtered = pd.DataFrame(columns=weather_df.columns)  # Empty DataFrame with correct columns
