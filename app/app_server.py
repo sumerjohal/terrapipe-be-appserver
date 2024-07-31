@@ -54,7 +54,9 @@ import threading
 import logging
 from s2sphere import CellId, Cell, LatLng
 import shapely.geometry
-
+from flask_caching import Cache
+from functools import wraps
+import cProfile
 
 
 warnings.filterwarnings('ignore')
@@ -76,8 +78,59 @@ resLevel = 20
 s2_max_resolution = resLevel
 maxResColName = 's2_index__L'+str(resLevel)
 
+config = {
+    "DEBUG": True,          # some Flask specific configs
+    "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
+    "CACHE_DEFAULT_TIMEOUT": 300
+}
 app = Flask(__name__)
+# tell Flask to use the above defined config
+app.config.from_mapping(config)
+cache = Cache(app)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+""" logs config """
+
+log_directory = 'logs'
+os.makedirs(log_directory, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    filename='/home/rnaura/terrapipe/app/logs/general.log',  # Change to your desired path
+    level=logging.INFO,  # Change to DEBUG for more verbose logging
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+general_log_file = os.path.join(log_directory, 'general.log')
+error_log_file = os.path.join(log_directory, 'error.log')
+
+# General log handler
+general_handler = logging.FileHandler(general_log_file)
+general_handler.setLevel(logging.INFO)
+general_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Error log handler
+error_handler = logging.FileHandler(error_log_file)
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Adding handlers to the logger
+logger = logging.getLogger(__name__)
+logger.addHandler(general_handler)
+logger.addHandler(error_handler)
+
+def log_time_and_calls(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(f"Calling function '{func.__name__}' with args: {args} and kwargs: {kwargs}")
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        duration = end_time - start_time
+        logger.info(f"Function '{func.__name__}' completed in {duration:.4f} seconds")
+        return result
+    return wrapper
+
+
 
 ################ DICTIONARIES
 property_dict = {
@@ -1261,41 +1314,6 @@ def reload_data_nldas(YYYY_str, MM_str):
     except Exception as e:
         print(f"Failed to reload data: {e}")
 
-def reload_data_ncep(YYYY_str, MM_str,Day_str):
-    global cached_weather_files_ncep, last_reload_time_ncep
-    try:
-        start_time = time.time()
-        month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
-        
-        cached_weather_files_ncep.clear()  # Clear the previous cache
-        
-        for day_dir in os.listdir(month_path):
-            day_path = os.path.join(month_path, day_dir)
-            if os.path.isdir(day_path):
-                day_files = [os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')]
-                if day_files:
-                    cached_weather_files_ncep[day_dir] = day_files
-        
-        last_reload_time_ncep = time.time()
-        print(f"Directories reloaded in {time.time() - start_time:.4f} seconds")
-    except Exception as e:
-        print(f"Failed to reload directories: {e}")
-world = gpd.read_file('/home/rnaura/terrapipe/ne_110m_admin_0_countries.shp')
-
-
-last_region = None
-def determine_region(lat, lon):
-    point = Point(lon, lat)
-    # Finding the row in the dataframe where the point lies within the country's boundary
-    country = world[world.contains(point)]
-    if not country.empty:
-        # Extracting the first row as the result
-        return country.iloc[0]['SOVEREIGNT']  # or another column name if different
-    else:
-        return 'Unknown'
-
-
-
 def getWeatherFromNLDAS(dtStr, agstack_geoid):
     
     """    
@@ -1407,96 +1425,175 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
     
     return weather_df_filtered
 
+
+
+def reload_data_ncep(YYYY_str, MM_str, Day_str):
+    cached_weather_files_ncep = {}
+    try:
+        start_time = time.time()
+        month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
+        
+        for day_dir in os.listdir(month_path):
+            day_path = os.path.join(month_path, day_dir)
+            if os.path.isdir(day_path):
+                day_files = [os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')]
+                if day_files:
+                    cached_weather_files_ncep[day_dir] = day_files
+
+        print(f"Directories reloaded in {time.time() - start_time:.4f} seconds")
+    except Exception as e:
+        print(f"Failed to reload directories: {e}")
+
+    return cached_weather_files_ncep
+world = gpd.read_file('/home/rnaura/terrapipe/ne_110m_admin_0_countries.shp')
+
+
+last_region = None
+def determine_region(lat, lon):
+    point = Point(lon, lat)
+    # Finding the row in the dataframe where the point lies within the country's boundary
+    country = world[world.contains(point)]
+    if not country.empty:
+        # Extracting the first row as the result
+        return country.iloc[0]['SOVEREIGNT']  # or another column name if different
+    else:
+        return 'Unknown'
+
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def empty_response():
+    weather_df_filtered = pd.DataFrame({
+    "latitude": [],
+    "longitude": [],
+    "time": [],
+    "PRMSL_meansealevel": [],
+    "GUST_surface": [],
+    "TSOIL_0M0D1mbelowground": [],
+    "SOILW_0M0D1mbelowground": [],
+    "TSOIL_0D1M0D4mbelowground": [],
+    "SOILW_0D1M0D4mbelowground": [],
+    "TSOIL_0D4M1mbelowground": [],
+    "SOILW_0D4M1mbelowground": [],
+    "TSOIL_1M2mbelowground": [],
+    "SOILW_1M2mbelowground": [],
+    "TMP_2maboveground": [],
+    "SPFH_2maboveground": [],
+    "DPT_2maboveground": [],
+    "RH_2maboveground": [],
+    "PRATE_surface": [],
+    "CRAIN_surface": [],
+    "SOTYP_surface": [],
+    "TCDC_entireatmosphere": [],
+    "DSWRF_surface": [],
+    "DLWRF_surface": [],
+    "USWRF_surface": [],
+    "ULWRF_surface": [],
+    "PRES_maxwind": [],
+    "s2_token_L5": [],
+    "s2_token_L7": [],
+    "s2_token_L9": [],
+    "Year": [],
+    "Month": [],
+    "Day": [],
+    "timestamp": []
+})
+    
+    return weather_df_filtered
+
+# # Custom cache key function
+# def make_cache_key():
+#     args = request.args
+#     dtStr = args.get('date')
+#     agstack_geoid = args.get('geoid')
+#     key_str = f"{dtStr}_{agstack_geoid}"
+#     print(f'Cache key generated: {hashlib.md5(key_str.encode()).hexdigest()}')
+#     return hashlib.md5(key_str.encode()).hexdigest()
+
+def make_key(*args, **kwargs):
+   """A function which is called to derive the key for a computed value.
+      The key in this case is the concat value of all the json request
+      parameters. Other strategy could to use any hashing function.
+   :returns: unique string for which the value should be cached.
+   """
+   user_data = request.args
+   return ",".join([f"{key}={value}" for key, value in user_data.items()])
+
+
+@cache.cached(timeout=5000000, make_cache_key=make_key)
+@log_time_and_calls
 def getWeatherFromNCEP(dtStr, agstack_geoid):
-    """
-    This API filters data from a PARQUET file based on S2 tokens and date. It retrieves polygons 
-    from the asset registry and fetches the S2 tokens according to the specified level and polygons.
-    params: date string, Geoid
-    """
+    dtStr = request.args.get('date')
+    agstack_geoid = request.args.get('geoid')
+
+    # Log the start of the request with geoid and date
+    logging.info(f"Data Processing started for geoid: {agstack_geoid}, date: {dtStr}")
+
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
 
+    global cached_weather_files_ncep, last_reload_time_ncep, cached_weather_df_ncep
     start_time_total = time.time()
-    global cached_weather_dirs_ncep, last_reload_time_ncep
 
-    # Reload data if necessary
-    if last_reload_time_ncep is None or time.time() - last_reload_time_ncep > 60 * 60 * 5:
-        
-        reload_data_ncep(YYYY_str, MM_str, DD_str)
-
-    
+    # Check if data for the requested date needs to be reloaded
     day_key = f'Day={DD_str}'
-    if day_key in cached_weather_files_ncep:
-        tables = [pq.read_table(file) for file in cached_weather_files_ncep[day_key]]
+    start_time_reload = time.time()
+    day_data = reload_data_ncep(YYYY_str, MM_str, DD_str)
+    logging.info(f"Data loading intomemory took {time.time() - start_time_reload:.2f} seconds")
+
+    try:
+        start_time_reading = time.time()
+        tables = [pq.read_table(file) for file in day_data[day_key]]
         combined_table = pa.concat_tables(tables)
         cached_weather_df_ncep = combined_table.to_pandas()
-    else:
-        cached_weather_df_ncep = None
-        print(f"No data found for Day={Day_str}")
-        
-    if not cached_weather_df_ncep.empty:
+        cached_weather_df_ncep.set_index(['s2_token_L9', 's2_token_L7', 's2_token_L5'], inplace=True)
+        logging.info(f" fetching day directory from memory and dump data into dataframe took {time.time() - start_time_reading:.2f} seconds")
+    except Exception as e:
+        return jsonify(empty_response())
 
-        wkt_polygon = fetchWKT(agstack_geoid)
-        # Extract the centroid's latitude and longitude
-        lat, lon = extractLatLonFromWKT(wkt_polygon)
-        s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon]) 
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+    logging.info(f" fetching polygons from asset registery took {time.time() - start_time_reading:.2f} seconds")
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
+    s2_index__L9_list = [str(token) for token in s2_index__L9_list]
 
-        weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L9'].isin(s2_index__L9_list)]
-        if  weather_df.empty:
-            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-            weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L5'].isin(level_5_tokens)]
-            print('L5----',weather_df)  
-        if  weather_df.empty:
+    try:
+        start_time_filtering = time.time()
+        weather_df = cached_weather_df_ncep.loc[(s2_index__L9_list, slice(None), slice(None))]
+        logging.info(f"Filtering data for level 9 tokens  took {time.time() - start_time_filtering:.2f} seconds")
+    except KeyError as e:
+
+        weather_df = pd.DataFrame()
+
+    try:
+        if weather_df.empty:
+            start_time_level7 = time.time()
             level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-            weather_df = cached_weather_df_ncep[cached_weather_df_ncep['s2_token_L7'].isin(level_7_tokens)]           
-            print('L7----',weather_df)
-        # weather_df_filtered.reset_index(inplace=True)
-                
-    if weather_df.empty:
-        weather_df = pd.DataFrame({
-            "latitude": [],
-            "longitude": [],
-            "time": [],
-            "PRMSL_meansealevel": [],
-            "GUST_surface": [],
-            "TSOIL_0M0D1mbelowground": [],
-            "SOILW_0M0D1mbelowground": [],
-            "TSOIL_0D1M0D4mbelowground": [],
-            "SOILW_0D1M0D4mbelowground": [],
-            "TSOIL_0D4M1mbelowground": [],
-            "SOILW_0D4M1mbelowground": [],
-            "TSOIL_1M2mbelowground": [],
-            "SOILW_1M2mbelowground": [],
-            "TMP_2maboveground": [],
-            "SPFH_2maboveground": [],
-            "DPT_2maboveground": [],
-            "RH_2maboveground": [],
-            "PRATE_surface": [],
-            "CRAIN_surface": [],
-            "SOTYP_surface": [],
-            "TCDC_entireatmosphere": [],
-            "DSWRF_surface": [],
-            "DLWRF_surface": [],
-            "USWRF_surface": [],
-            "ULWRF_surface": [],
-            "PRES_maxwind": [],
-            "s2_token_L5": [],
-            "s2_token_L7": [],
-            "s2_token_L9": [],
-            "Year": [],
-            "Month": [],
-            "Day": [],
-            "timestamp": []
-        })
+            weather_df = cached_weather_df_ncep.loc[(slice(None), level_7_tokens, slice(None))]
+            logging.info(f"Filtering data for level 7 tokens  took {time.time() - start_time_level7:.2f} seconds")
+    except KeyError as e:
 
-    end_time_total = time.time()
-    total_duration = end_time_total - start_time_total
-    print(f"Total request handling time: {total_duration:.4f} seconds")
+        weather_df = pd.DataFrame()
+
+    try:
+        if weather_df.empty:
+            start_time_level5 = time.time()
+            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
+            weather_df = cached_weather_df_ncep.loc[(slice(None), slice(None), level_5_tokens)]
+            logging.info(f"Filtering data for level 5 tokens for geoid: {agstack_geoid}, date: {dtStr} took {time.time() - start_time_level5:.2f} seconds")
+    except KeyError as e:
+        weather_df = pd.DataFrame()
+
+    if weather_df.empty:
+        weather_df = pd.DataFrame(empty_response())
+
+    total_duration = time.time() - start_time_total
+    logging.info(f"Total function execution for geoid: {agstack_geoid}, date: {dtStr} took {total_duration:.2f} seconds")
 
     return weather_df
-    
+
+
 # def getWeatherFromNLDAS(agstack_geoid, dtStr):
 #     filePath = '/mnt/md1/NLDAS/PARQUET_S2/'
 #     tok=dtStr.split('-')
