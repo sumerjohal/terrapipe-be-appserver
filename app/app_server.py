@@ -60,7 +60,9 @@ import pstats
 from io import StringIO
 from functools import wraps
 from line_profiler import LineProfiler
-
+from flask_cors import CORS
+import concurrent.futures
+import pyarrow.parquet as pq
 
 warnings.filterwarnings('ignore')
 
@@ -92,6 +94,7 @@ logging.basicConfig(
 
 
 app = Flask(__name__)
+CORS(app)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 ################ DICTIONARIES
@@ -1210,71 +1213,29 @@ def get_level_5_tokens(level_9_tokens):
         s2sphere.CellId.from_token(token).parent(5).to_token()
         for token in level_9_tokens
     ]
+    print(f'level_5_tokens {level_5_tokens}')
     return level_5_tokens 
 
-last_update_time = None
-# cached_weather_df = pd.DataFrame()  # Placeholder for cached data
-last_reload_time = None
-
-cached_weather_df_nldas = pd.DataFrame()
-last_reload_time_nldas = None
-
-cached_weather_df_ncep = pd.DataFrame()
-cached_weather_dirs_ncep= {}
-last_reload_time_ncep = None
-cache_ncep = {}
-region_weather_cache = {}
-region_last_reload_time = {}
-cached_day_files = {}
-cached_weather_files_ncep = {}
-
-
-base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
 base_path_ncep = '/mnt/md1/NCEP/PARQUET_S2/'
-
-class FileChangeHandler(FileSystemEventHandler):
-    def __init__(self, reload_function):
-        self.reload_function = reload_function
-
-    def on_modified(self, event):
-        if event.src_path.endswith('.parquet'):
-            print(f"File modified: {event.src_path}")
-            self.reload_function()
-
-    def on_created(self, event):
-        if event.src_path.endswith('.parquet'):
-            print(f"File created: {event.src_path}")
-            self.reload_function()
-
-def start_file_monitoring(path, reload_function):
-    event_handler = FileChangeHandler(reload_function)
-    observer = Observer()
-    observer.schedule(event_handler, path, recursive=True)
-    observer_thread = threading.Thread(target=observer.start)
-    observer_thread.daemon = True
-    observer_thread.start()
-    print(f"Started monitoring {path} for changes")
+base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
 
 def reload_data_nldas(YYYY_str, MM_str):
-    global cached_weather_df_nldas, last_reload_time_nldas
+    cached_weather_files_ncep = {}
     try:
         start_time = time.time()
-        month_path = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
+        month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
         
-        all_files = []
         for day_dir in os.listdir(month_path):
             day_path = os.path.join(month_path, day_dir)
             if os.path.isdir(day_path):
-                all_files.extend([os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')])
-        
-        tables = [pq.read_table(file) for file in all_files]
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df_nldas = combined_table.to_pandas()
-        last_reload_time_nldas = time.time()
-        
-        print(f"Data reloaded in {time.time() - start_time:.4f} seconds")
+                day_files = [os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')]
+                if day_files:
+                    cached_weather_files_ncep[day_dir] = day_files
+
+        print(f"Directories reloaded in {time.time() - start_time:.4f} seconds")
     except Exception as e:
-        print(f"Failed to reload data: {e}")
+        print(f"Failed to reload directories: {e}")
+    return  cached_weather_files_ncep
 
 def reload_data_ncep(YYYY_str, MM_str, Day_str):
     cached_weather_files_ncep = {}
@@ -1294,135 +1255,7 @@ def reload_data_ncep(YYYY_str, MM_str, Day_str):
         print(f"Failed to reload directories: {e}")
 
     return cached_weather_files_ncep
-world = gpd.read_file('/home/rnaura/terrapipe/ne_110m_admin_0_countries.shp')
 
-
-last_region = None
-def determine_region(lat, lon):
-    point = Point(lon, lat)
-    # Finding the row in the dataframe where the point lies within the country's boundary
-    country = world[world.contains(point)]
-    if not country.empty:
-        # Extracting the first row as the result
-        return country.iloc[0]['SOVEREIGNT']  # or another column name if different
-    else:
-        return 'Unknown'
-
-
-
-def getWeatherFromNLDAS(dtStr, agstack_geoid):
-    
-    """    
-    This API filters data from a PARQUET file based on S2 tokens and date. It retrieves polygons 
-    from the asset registry and fetches the S2 tokens according to the specified level and polygons.
-    params: date string , Geoid
-    """
-
-    configFile = '/home/rnaura/terrapipe/config/11SKA/11SKA.json'
-    tok = dtStr.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1].zfill(2)
-    DD_str = tok[2]
-
-    # Load and validate the JSON file
-    with open(configFile, "r") as jsonfile:
-        fieldJSON = json.load(jsonfile)
-        field_geoid = fieldJSON['geoid']
-        field_wkt = fieldJSON['wkt']
-
-    # Load the WKT and calculate centroid
-    fieldPoly = wkt.loads(field_wkt)
-    c = fieldPoly.centroid
-    lat = c.y
-    lon = c.x
-    global cached_weather_df_nldas, last_reload_time_nldas
-    
-    
-
-    lats, lons = [lat], [lon]
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, lats, lons) 
-
-    start_time_total = time.time()
-
-    if last_reload_time_nldas is None or time.time() - last_reload_time_nldas > 60 * 60* 5:
-        reload_data_nldas(YYYY_str, MM_str)   
-    
-    weather_df_filtered = pd.DataFrame()
-    if not cached_weather_df_ncep.empty:
-
-        # Check if data needs reloading based on last_reload_time
-        if 's2_token_L9' in cached_weather_df_nldas.columns and not cached_weather_df_nldas.empty:
-            cached_weather_df_nldas = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L9'].isin(s2_index__L9_list)]
-        
-        if not cached_weather_df_nldas.empty:
-            level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-            weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L5'].isin(level_5_tokens)]
-            print(weather_df)
-        if not cached_weather_df_nldas.empty:
-            level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-            weather_df = cached_weather_df_nldas[cached_weather_df_nldas['s2_token_L7'].isin(level_7_tokens)]
-            
-        try:
-            weather_df['Year'] = weather_df['Year'].astype(int)
-            weather_df['Month'] = weather_df['Month'].astype(int)
-            weather_df['Day'] = weather_df['Day'].astype(int)
-            
-            weather_df_filtered = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
-                                             (weather_df['Month'] == int(MM_str)) & 
-                                             (weather_df['Day'] == int(DD_str))]
-            
-            print("After filtering:")
-            print(weather_df_filtered.head())
-            
-        except KeyError as e:
-            print(f"KeyError: {e}")
-            # weather_df_filtered = pd.DataFrame(columns=weather_df.columns)  # Empty DataFrame with correct columns
-        
-        end_time_total = time.time()
-        total_duration = end_time_total - start_time_total
-        print(f"Total request handling time: {total_duration:.4f} seconds")
-
-    else:
-        weather_df_filtered = pd.DataFrame({
-            "latitude": [],
-            "longitude": [],
-            "time": [],
-            "PRMSL_meansealevel": [],
-            "GUST_surface": [],
-            "TSOIL_0M0D1mbelowground": [],
-            "SOILW_0M0D1mbelowground": [],
-            "TSOIL_0D1M0D4mbelowground": [],
-            "SOILW_0D1M0D4mbelowground": [],
-            "TSOIL_0D4M1mbelowground": [],
-            "SOILW_0D4M1mbelowground": [],
-            "TSOIL_1M2mbelowground": [],
-            "SOILW_1M2mbelowground": [],
-            "TMP_2maboveground": [],
-            "SPFH_2maboveground": [],
-            "DPT_2maboveground": [],
-            "RH_2maboveground": [],
-            "PRATE_surface": [],
-            "CRAIN_surface": [],
-            "SOTYP_surface": [],
-            "TCDC_entireatmosphere": [],
-            "DSWRF_surface": [],
-            "DLWRF_surface": [],
-            "USWRF_surface": [],
-            "ULWRF_surface": [],
-            "PRES_maxwind": [],
-            "s2_token_L5": [],
-            "s2_token_L7": [],
-            "s2_token_L9": [],
-            "Year": [],
-            "Month": [],
-            "Day": [],
-            "timestamp": []
-        })
-    
-    return weather_df_filtered
-
-
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def empty_response():
     weather_df_filtered = pd.DataFrame({
@@ -1463,6 +1296,163 @@ def empty_response():
     
     return weather_df_filtered
 
+from functools import wraps
+def memoize(func):
+    cache = {}
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+
+    return wrapper
+
+def read_parquet_file(file):
+    return pq.read_table(file)
+
+from shapely import wkt, geometry
+@memoize
+def getWeatherFromNLDAS(dtStr, agstack_geoid):
+    
+    """    
+    This API filters data from a PARQUET file based on S2 tokens and date. It retrieves polygons 
+    from the asset registry and fetches the S2 tokens according to the specified level and polygons.
+    params: date string , Geoid
+    """
+    # logging.info(f"Data Processing started for geoid: {agstack_geoid}, date: {dtStr}")
+
+    # Parse the date
+    tok = dtStr.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1].zfill(2)
+    DD_str = tok[2]
+
+    start_time_total = time.time()
+
+    day_key = f'Day={DD_str}'
+
+    # Reload data if necessary
+    start_time_reload = time.time()
+    day_data = reload_data_nldas(YYYY_str, MM_str)
+    reload_duration = time.time() - start_time_reload
+    # logging.info(f"Data loading into memory took {reload_duration:.2f} seconds")
+
+    try:
+        # Read and combine Parquet files using threading
+        # start_time_reading = time.time()
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            tables = list(executor.map(read_parquet_file, day_data[day_key]))
+        
+        # reading_duration = time.time() - start_time_reading
+        # logging.info(f"Data table creation took {reading_duration:.2f} seconds")
+
+        combined_table = pa.concat_tables(tables)
+        # count_table = len(combined_table)
+        # logging.info(f"Parquet table count: {count_table}")
+        
+        # start_time_combined_table = time.time()
+        # reading_duration = time.time() - start_time_combined_table
+        # logging.info(f"Table concatenation took {reading_duration:.2f} seconds")
+
+        # start_time_table_to_dataframe = time.time()
+        cached_weather_df_nldas = combined_table.to_pandas()
+        # Remove NaN values
+        cached_weather_df_nldas.dropna(inplace=True)
+        # reading_duration = time.time() - start_time_table_to_dataframe
+        # logging.info(f"Tables dataframe conversion took {reading_duration:.2f} seconds")
+
+        # start_time_multi_indexing = time.time()
+        cached_weather_df_nldas.set_index(['s2_token_L9', 's2_token_L7', 's2_token_L5'], inplace=True)
+        # reading_duration = time.time() - start_time_multi_indexing
+        # logging.info(f"Multi-indexing took {reading_duration:.2f} seconds")
+
+    except Exception as e:
+        # logging.error(f"Error reading Parquet files: {e}")
+        return empty_response()
+        
+   # Fetch WKT polygon and extract lat/lon
+    start_time_polygon = time.time()
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+    polygon_duration = time.time() - start_time_polygon
+
+    # logging.info(f"Fetching and processing WKT polygon took {polygon_duration:.2f} seconds")
+
+    # Filter data by level 9 tokens
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
+    # s2_index__L9_list = [str(token) for token in s2_index__L9_list]
+    # start_time_filtering_level9 = time.time()
+    try:
+        weather_df = cached_weather_df_nldas.loc[(s2_index__L9_list, slice(None), slice(None))]
+        # filtering_level9_duration = time.time() - start_time_filtering_level9
+        # logging.info(f"Filtering data for level 9 tokens took {filtering_level9_duration:.2f} seconds")
+    except KeyError:
+        weather_df = pd.DataFrame()
+
+    # Filter data by level 7 tokens if level 9 data is empty
+    if weather_df.empty:
+        # start_time_filtering_level7 = time.time()
+        level_7_tokens = get_level_7_tokens(s2_index__L9_list)
+    
+        weather_df = cached_weather_df_nldas.loc[(slice(None), level_7_tokens, slice(None))]
+            # filtering_level7_duration = time.time() - start_time_filtering_level7
+            # logging.info(f"Filtering data for level 7 tokens took {filtering_level7_duration:.2f} seconds")
+    
+
+    # Filter data by level 5 tokens if level 7 data is empty
+    if weather_df.empty:
+        
+        # start_time_filtering_level5 = time.time()
+        level_5_tokens = get_level_5_tokens(s2_index__L9_list)
+  
+        weather_df = cached_weather_df_nldas.loc[(slice(None), slice(None), level_5_tokens)]
+            # filtering_level5_duration = time.time() - start_time_filtering_level5
+            # logging.info(f"Filtering data for level 5 tokens took {filtering_level5_duration:.2f} seconds")
+  
+        # Filter data by date
+    filtered_df = weather_df[
+        (weather_df['Year'].astype(int) == int(YYYY_str)) &
+        (weather_df['Month'].astype(int) == int(MM_str)) &
+        (weather_df['Day'].astype(int) == int(DD_str))
+    ]
+    # print(f"Filtered DataFrame for date {dtStr}: {filtered_df.shape}")
+
+ # Extract latitudes and longitudes from the filtered DataFrame
+    lats = filtered_df['latitude'].values
+    lons = filtered_df['longitude'].values
+
+    # Define boundary around the given lat/lon (adjust as needed)
+    boundary_radius = 0.1  # Example boundary radius in degrees
+    lat_min = lat - boundary_radius
+    lat_max = lat + boundary_radius
+    lon_min = lon - boundary_radius
+    lon_max = lon + boundary_radius
+
+    # Check if all lat/lon fit within the boundary
+    within_boundary = np.all((lats >= lat_min) & (lats <= lat_max) & (lons >= lon_min) & (lons <= lon_max))
+    if within_boundary:
+        print(f"All lat/lon values are within the boundary around ({lat}, {lon}).")
+    else:
+        print(f"Some lat/lon values are outside the boundary around ({lat}, {lon}).")
+    # Return empty response if no data is found
+    if weather_df.empty:
+        weather_df = pd.DataFrame(empty_response())
+
+    end_time_total = time.time()
+    total_duration = end_time_total - start_time_total
+    print(f'total time taken to complete the process --{total_duration}')
+    # logging.info(f"Total function execution took {total_duration:.2f} seconds")
+
+    return filtered_df
+
+
+
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 # # Custom cache key function
 # def make_cache_key():
 #     args = request.args
@@ -1472,29 +1462,14 @@ def empty_response():
 #     print(f'Cache key generated: {hashlib.md5(key_str.encode()).hexdigest()}')
 #     return hashlib.md5(key_str.encode()).hexdigest()
 
-def make_key(*args, **kwargs):
-   """A function which is called to derive the key for a computed value.
-      The key in this case is the concat value of all the json request
-      parameters. Other strategy could to use any hashing function.
-   :returns: unique string for which the value should be cached.
-   """
-   user_data = request.args
-   return ",".join([f"{key}={value}" for key, value in user_data.items()])
-
-
-def memoize(func):
-    cache = {}
-
-    @wraps(func)
-    def wrapper(*args,**kwargs):
-        key = str(args) + str(kwargs)
-
-        if key not in cache:
-            cache[key] = func(*args,**kwargs)
-        return cache[key]
-
-    return wrapper
-
+# def make_key(*args, **kwargs):
+#    """A function which is called to derive the key for a computed value.
+#       The key in this case is the concat value of all the json request
+#       parameters. Other strategy could to use any hashing function.
+#    :returns: unique string for which the value should be cached.
+#    """
+#    user_data = request.args
+#    return ",".join([f"{key}={value}" for key, value in user_data.items()])
 
 # @cache.cached(timeout=5000000, make_cache_key=make_key)
 # @log_time_and_calls
@@ -1524,35 +1499,40 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
     logging.info(f"Data loading into memory took {reload_duration:.2f} seconds")
 
     try:
-        # Read and combine Parquet files
+        # Read and combine Parquet files using threading
         start_time_reading = time.time()
-        tables = [pq.read_table(file) for file in day_data[day_key]]
-        reading_duration = time.time() - start_time_reading
-        logging.info(f"data table creation took {reading_duration:.2f} seconds")
         
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            tables = list(executor.map(read_parquet_file, day_data[day_key]))
+        
+        reading_duration = time.time() - start_time_reading
+        logging.info(f"Data table creation took {reading_duration:.2f} seconds")
+
         combined_table = pa.concat_tables(tables)
         count_table = len(combined_table)
-        logging.info(f"parquet table count {count_table} ")
-        start_time_combined_table= time.time()
+        logging.info(f"Parquet table count: {count_table}")
+        
+        start_time_combined_table = time.time()
         reading_duration = time.time() - start_time_combined_table
-        logging.info(f"table concatenation took {reading_duration:.2f} seconds")
+        logging.info(f"Table concatenation took {reading_duration:.2f} seconds")
 
-        start_time_table_to_dataframe= time.time()
+        start_time_table_to_dataframe = time.time()
         cached_weather_df_ncep = combined_table.to_pandas()
-
+        # Remove NaN values
+        cached_weather_df_ncep.dropna(inplace=True)
         reading_duration = time.time() - start_time_table_to_dataframe
-        logging.info(f"tables dataframe conversion took {reading_duration:.2f} seconds")
+        logging.info(f"Tables dataframe conversion took {reading_duration:.2f} seconds")
 
-        start_time_multi_indexing= time.time()
+        start_time_multi_indexing = time.time()
         cached_weather_df_ncep.set_index(['s2_token_L9', 's2_token_L7', 's2_token_L5'], inplace=True)
         reading_duration = time.time() - start_time_multi_indexing
-        logging.info(f"Reading and combining Parquet files took {reading_duration:.2f} seconds")
+        logging.info(f"Multi-indexing took {reading_duration:.2f} seconds")
 
     except Exception as e:
-        logging.error(f"Error reading parquet files: {e}")
+        logging.error(f"Error reading Parquet files: {e}")
         return empty_response()
-
-    # Fetch WKT polygon and extract lat/lon
+        
+   # Fetch WKT polygon and extract lat/lon
     start_time_polygon = time.time()
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
@@ -1591,7 +1571,9 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
             logging.info(f"Filtering data for level 5 tokens took {filtering_level5_duration:.2f} seconds")
         except KeyError:
             weather_df = pd.DataFrame()
-
+    weather_df = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
+                    (weather_df['Month'] == int(MM_str)) & 
+                    (weather_df['Day'] == int(DD_str))]
     # Return empty response if no data is found
     if weather_df.empty:
         weather_df = pd.DataFrame(empty_response())
@@ -1602,45 +1584,57 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
 
     return weather_df
 
-# def getWeatherFromNLDAS(agstack_geoid, dtStr):
-#     filePath = '/mnt/md1/NLDAS/PARQUET_S2/'
-#     tok=dtStr.split('-')
-#     YYYY_str=tok[0]
-#     MM_str=tok[1]
-#     DD_str=tok[2]
+# def getWeatherFromNCEP(dtStr,agstack_geoid):
+#     filePath = '/mnt/md1/NCEP/PARQUET_S2/'
+# #     # Parse the date
+#     tok = dtStr.split('-')
+   
+#     YYYY_str = tok[0]
+#     MM_str = tok[1].zfill(2)
+#     DD_str = tok[2]
+
     
-#     configFile =  fieldDataConfigPath + agstack_geoid+'.json'
-#     #NDays = (datetime.today() - datetime.strptime(dtStr,'%Y-%m-%d')).days
+#     # (configFile =  fieldDataConfigPath + agstack_geoid+'.json'
+#     # #NDays = (datetime.today() - datetime.strptime(dtStr,'%Y-%m-%d')).days
     
-#     #Validate the date 
-#     #1. Dt should be in the last 90 days from today
-#     #2. Dt should be a valida date
+#     # #Validate the date 
+#     # #1. Dt should be in the last 90 days from today
+#     # #2. Dt should be a valida date
     
-#     s1_time_start = time.time()
-#     with open(configFile, "r") as jsonfile:
-#         fieldJSON = json.load(jsonfile)
-#         field_geoid = fieldJSON['geoid']
-#         field_wkt = fieldJSON['wkt']
-#     fieldPoly = shapely.wkt.loads(field_wkt)
-#     c=fieldPoly.centroid
-#     lat=c.y
-#     lon=c.x
+#     # s1_time_start = time.time()
+#     # with open(configFile, "r") as jsonfile:
+#     #     fieldJSON = json.load(jsonfile)
+#     #     field_geoid = fieldJSON['geoid']
+#     #     field_wkt = fieldJSON['wkt']
+#     # fieldPoly = shapely.wkt.loads(field_wkt)
+#     # c=fieldPoly.centroid
+#     # lat=c.y
+#     # lon=c.x
         
+
+#     #     # Fetch WKT polygon and extract lat/lon
+#     start_time_polygon = time.time()
+#     wkt_polygon = fetchWKT(agstack_geoid)
+#     lat, lon = extractLatLonFromWKT(wkt_polygon)
     
 #     lats=[lat]
 #     lons=[lon]
 #     start_time = time.time()
 #     #get the list of S2 indeces and CIDs for the data point
-#     s2_index__L8_list, L8_cids = get_s2_cellids_and_token_list(8, lats, lons)
-#     list_of_L8_paths = [filePath+'s2_index__L8='+x for x in s2_index__L8_list 
-#                         if os.path.exists(filePath+'s2_index__L8='+x)]
+#     s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
+#     # print(s2_index__L8_list)
+#     s2_index__L8_list = ['50c']
+#     list_of_L8_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
+#                         if os.path.exists(filePath+'s2_index__L3='+x)]
     
 #     weather_datasets = []
-#     for x in list_of_L8_paths:
+#     for x in list_of_L3_paths:
 #         weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+#     print(weather_datasets)
     
 #     #get the Data
 #     w_all = pd.DataFrame()
+#     weather_df = pd.DataFrame()
 #     for weatherDataset in weather_datasets:
 
 #         yrStr=  YYYY_str
@@ -1984,6 +1978,7 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
 #def index():
 #    return render_template('index.html')
 #
+cache_nldas = {}
 @app.route('/')
 #def hello_world():
  #   return 'Hello World!'
@@ -1992,11 +1987,34 @@ def getNLDASData():
     geoid = request.args['geoid']
     # s2_token = ["8094c20c","8094e9e4"]
     date = request.args.get('date', '')
-    weather_df = getWeatherFromNLDAS(date,geoid)
-    weather_df.reset_index(inplace=True)
-    # Convert DataFrame to JSON
-    json_data = weather_df.to_json(orient='records')
-    return json_data
+    # Start timing for cache access
+    start_time_cache_access = time.time()
+
+    if geoid in cache_nldas:
+        # Log cache access time
+        # cache_access_duration = time.time() - start_time_cache_access
+        # logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
+        return jsonify(cache_nldas[geoid])
+
+    # Data not in cache, fetch from NCEP
+    weather_df = getWeatherFromNLDAS(date, geoid)
+    
+    try:
+        weather_df.reset_index(inplace=True)
+    except:
+        logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
+        pass
+
+    # Convert DataFrame to a dictionary
+    json_data = weather_df.to_dict(orient='records')
+
+    # Cache the response
+    cache_nldas[geoid] = json_data
+
+    # Log the completion of the request
+    logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
+
+    return jsonify(json_data)
 
 cache_ncep = {}
 
@@ -2011,22 +2029,20 @@ def getNCEPWeatherData():
     if geoid in cache_ncep:
         # Log cache access time
         cache_access_duration = time.time() - start_time_cache_access
-        # logging.info(f"Cache access for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-
         logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
         return jsonify(cache_ncep[geoid])
 
     # Data not in cache, fetch from NCEP
     weather_df = getWeatherFromNCEP(date, geoid)
     
-    try:    
+    try:
         weather_df.reset_index(inplace=True)
     except:
         logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
         pass
 
-    # Convert DataFrame to JSON
-    json_data = weather_df.to_json(orient='records')
+    # Convert DataFrame to a dictionary
+    json_data = weather_df.to_dict(orient='records')
 
     # Cache the response
     cache_ncep[geoid] = json_data
@@ -2034,7 +2050,7 @@ def getNCEPWeatherData():
     # Log the completion of the request
     logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
 
-    return json_data
+    return jsonify(json_data)
 
 @app.route('/')
 def home():
@@ -2076,7 +2092,9 @@ def home():
 #     return matchDict
 
 # Directory watching and hot-reloading setup
-extra_dirs = [base_path_nldas, base_path_ncep]
+base_path_nldas_reload = '/mnt/md1/NLDAS/PARQUET_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/'
+base_path_ncep_reload = '/mnt/md1/NCEP/PARQUET_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/'
+extra_dirs = [base_path_nldas_reload, base_path_ncep_reload]
 extra_files = extra_dirs[:]
 
 for extra_dir in extra_dirs:
