@@ -1244,6 +1244,7 @@ def reload_data_ncep(YYYY_str, MM_str, Day_str):
         month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
         
         for day_dir in os.listdir(month_path):
+            # print(day_dir)
             day_path = os.path.join(month_path, day_dir)
             if os.path.isdir(day_path):
                 day_files = [os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')]
@@ -1383,6 +1384,7 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
 
     # Filter data by level 9 tokens
     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
+    # print(f'tokeen -9 {s2_index__L9_list}')
     # s2_index__L9_list = [str(token) for token in s2_index__L9_list]
     # start_time_filtering_level9 = time.time()
     try:
@@ -1409,35 +1411,24 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
         level_5_tokens = get_level_5_tokens(s2_index__L9_list)
   
         weather_df = cached_weather_df_nldas.loc[(slice(None), slice(None), level_5_tokens)]
-            # filtering_level5_duration = time.time() - start_time_filtering_level5
-            # logging.info(f"Filtering data for level 5 tokens took {filtering_level5_duration:.2f} seconds")
-  
-        # Filter data by date
-    filtered_df = weather_df[
-        (weather_df['Year'].astype(int) == int(YYYY_str)) &
-        (weather_df['Month'].astype(int) == int(MM_str)) &
-        (weather_df['Day'].astype(int) == int(DD_str))
-    ]
-    # print(f"Filtered DataFrame for date {dtStr}: {filtered_df.shape}")
+    if len(weather_df) > 1:
 
- # Extract latitudes and longitudes from the filtered DataFrame
-    lats = filtered_df['latitude'].values
-    lons = filtered_df['longitude'].values
+        # Convert the time column to datetime first, if it isn't already
+        weather_df['time'] = pd.to_datetime(weather_df['time'], errors='coerce')
 
-    # Define boundary around the given lat/lon (adjust as needed)
-    boundary_radius = 0.1  # Example boundary radius in degrees
-    lat_min = lat - boundary_radius
-    lat_max = lat + boundary_radius
-    lon_min = lon - boundary_radius
-    lon_max = lon + boundary_radius
+        # Convert only the relevant columns to numeric, excluding 'time'
+        numeric_cols = weather_df.columns.drop('time')
+        weather_df[numeric_cols] = weather_df[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-    # Check if all lat/lon fit within the boundary
-    within_boundary = np.all((lats >= lat_min) & (lats <= lat_max) & (lons >= lon_min) & (lons <= lon_max))
-    if within_boundary:
-        print(f"All lat/lon values are within the boundary around ({lat}, {lon}).")
-    else:
-        print(f"Some lat/lon values are outside the boundary around ({lat}, {lon}).")
-    # Return empty response if no data is found
+        # Group by the 'time' column and take the mean of numeric columns
+        weather_df = weather_df.groupby('time').mean().reset_index()
+
+        # Ensure the 'time' column is a datetime object after grouping
+        weather_df['time'] = pd.to_datetime(weather_df['time'], errors='coerce')
+
+        # Convert the 'time' column to ISO format using strftime
+        weather_df['time'] = weather_df['time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+
     if weather_df.empty:
         weather_df = pd.DataFrame(empty_response())
 
@@ -1446,13 +1437,11 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
     print(f'total time taken to complete the process --{total_duration}')
     # logging.info(f"Total function execution took {total_duration:.2f} seconds")
 
-    return filtered_df
+    return weather_df
 
 
 
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s'
 # # Custom cache key function
 # def make_cache_key():
 #     args = request.args
@@ -1525,6 +1514,7 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
 
         start_time_multi_indexing = time.time()
         cached_weather_df_ncep.set_index(['s2_token_L9', 's2_token_L7', 's2_token_L5'], inplace=True)
+        # print(f'cached_weather_df_ncep--{cached_weather_df_ncep}')
         reading_duration = time.time() - start_time_multi_indexing
         logging.info(f"Multi-indexing took {reading_duration:.2f} seconds")
 
@@ -1543,6 +1533,7 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
     start_time_filtering_level9 = time.time()
     s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
     s2_index__L9_list = [str(token) for token in s2_index__L9_list]
+    # print(s2_index__L9_list)
     try:
         weather_df = cached_weather_df_ncep.loc[(s2_index__L9_list, slice(None), slice(None))]
         filtering_level9_duration = time.time() - start_time_filtering_level9
@@ -1558,8 +1549,11 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
             weather_df = cached_weather_df_ncep.loc[(slice(None), level_7_tokens, slice(None))]
             filtering_level7_duration = time.time() - start_time_filtering_level7
             logging.info(f"Filtering data for level 7 tokens took {filtering_level7_duration:.2f} seconds")
-        except KeyError:
+        except KeyError as e:
+            print(f'{e} at level 7')
             weather_df = pd.DataFrame()
+
+    
 
     # Filter data by level 5 tokens if level 7 data is empty
     if weather_df.empty:
@@ -1569,14 +1563,36 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
             weather_df = cached_weather_df_ncep.loc[(slice(None), slice(None), level_5_tokens)]
             filtering_level5_duration = time.time() - start_time_filtering_level5
             logging.info(f"Filtering data for level 5 tokens took {filtering_level5_duration:.2f} seconds")
-        except KeyError:
+        except KeyError as e:
+            print(f'{e} at level 5')
             weather_df = pd.DataFrame()
-    weather_df = weather_df[(weather_df['Year'] == int(YYYY_str)) & 
-                    (weather_df['Month'] == int(MM_str)) & 
-                    (weather_df['Day'] == int(DD_str))]
+
+    weather_df = weather_df[(weather_df['Year'].astype(int) == int(YYYY_str)) & 
+                    (weather_df['Month'].astype(int) == int(MM_str)) & 
+                    (weather_df['Day'].astype(int) == int(DD_str))]
+
+    print(f'weather_df--{weather_df}')
+    if len(weather_df) > 1:
+        # Convert the time column to datetime first, if it isn't already
+        weather_df['time'] = pd.to_datetime(weather_df['time'], errors='coerce')
+
+        # Convert only the relevant columns to numeric, excluding 'time'
+        numeric_cols = weather_df.columns.drop('time')
+        weather_df[numeric_cols] = weather_df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+        # Group by the 'time' column and take the mean of numeric columns
+        weather_df = weather_df.groupby('time').mean().reset_index()
+
+        # Ensure the 'time' column is a datetime object after grouping
+        weather_df['time'] = pd.to_datetime(weather_df['time'], errors='coerce')
+
+        # Convert the 'time' column to ISO format using strftime
+        weather_df['time'] = weather_df['time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+
     # Return empty response if no data is found
     if weather_df.empty:
         weather_df = pd.DataFrame(empty_response())
+
 
     end_time_total = time.time()
     total_duration = end_time_total - start_time_total
@@ -1584,57 +1600,46 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
 
     return weather_df
 
-# def getWeatherFromNCEP(dtStr,agstack_geoid):
-#     filePath = '/mnt/md1/NCEP/PARQUET_S2/'
-# #     # Parse the date
-#     tok = dtStr.split('-')
-   
-#     YYYY_str = tok[0]
-#     MM_str = tok[1].zfill(2)
-#     DD_str = tok[2]
 
+# def getWeatherFromNLDAS(agstack_geoid, dtStr):
+#     filePath = '/mnt/md1/NLDAS/PARQUET_S2/'
+#     tok=dtStr.split('-')
+#     YYYY_str=tok[0]
+#     MM_str=tok[1]
+#     DD_str=tok[2]
     
-#     # (configFile =  fieldDataConfigPath + agstack_geoid+'.json'
-#     # #NDays = (datetime.today() - datetime.strptime(dtStr,'%Y-%m-%d')).days
+#     configFile =  fieldDataConfigPath + agstack_geoid+'.json'
+#     #NDays = (datetime.today() - datetime.strptime(dtStr,'%Y-%m-%d')).days
     
-#     # #Validate the date 
-#     # #1. Dt should be in the last 90 days from today
-#     # #2. Dt should be a valida date
+#     #Validate the date 
+#     #1. Dt should be in the last 90 days from today
+#     #2. Dt should be a valida date
     
-#     # s1_time_start = time.time()
-#     # with open(configFile, "r") as jsonfile:
-#     #     fieldJSON = json.load(jsonfile)
-#     #     field_geoid = fieldJSON['geoid']
-#     #     field_wkt = fieldJSON['wkt']
-#     # fieldPoly = shapely.wkt.loads(field_wkt)
-#     # c=fieldPoly.centroid
-#     # lat=c.y
-#     # lon=c.x
+#     s1_time_start = time.time()
+#     with open(configFile, "r") as jsonfile:
+#         fieldJSON = json.load(jsonfile)
+#         field_geoid = fieldJSON['geoid']
+#         field_wkt = fieldJSON['wkt']
+#     fieldPoly = shapely.wkt.loads(field_wkt)
+#     c=fieldPoly.centroid
+#     lat=c.y
+#     lon=c.x
         
-
-#     #     # Fetch WKT polygon and extract lat/lon
-#     start_time_polygon = time.time()
-#     wkt_polygon = fetchWKT(agstack_geoid)
-#     lat, lon = extractLatLonFromWKT(wkt_polygon)
     
 #     lats=[lat]
 #     lons=[lon]
 #     start_time = time.time()
 #     #get the list of S2 indeces and CIDs for the data point
-#     s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
-#     # print(s2_index__L8_list)
-#     s2_index__L8_list = ['50c']
-#     list_of_L8_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
-#                         if os.path.exists(filePath+'s2_index__L3='+x)]
+#     s2_index__L8_list, L8_cids = get_s2_cellids_and_token_list(8, lats, lons)
+#     list_of_L8_paths = [filePath+'s2_index__L8='+x for x in s2_index__L8_list 
+#                         if os.path.exists(filePath+'s2_index__L8='+x)]
     
 #     weather_datasets = []
-#     for x in list_of_L3_paths:
+#     for x in list_of_L8_paths:
 #         weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
-#     print(weather_datasets)
     
 #     #get the Data
 #     w_all = pd.DataFrame()
-#     weather_df = pd.DataFrame()
 #     for weatherDataset in weather_datasets:
 
 #         yrStr=  YYYY_str
