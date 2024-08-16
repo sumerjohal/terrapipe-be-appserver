@@ -55,21 +55,17 @@ import logging
 from s2sphere import CellId, Cell, LatLng
 import shapely.geometry
 from flask_caching import Cache
-import cProfile
-import pstats
-from io import StringIO
 from functools import wraps
-from line_profiler import LineProfiler
 from flask_cors import CORS
+
 import concurrent.futures
 import pyarrow.parquet as pq
-
 warnings.filterwarnings('ignore')
 
 ################ GLOBALS
 #global res_gdf
 #global pa_filePath
-profiler = LineProfiler()
+
 
 pa_filePath = '/mnt/md1/SENTINEL/PARQUET_S2_L20/'
 tileStr = '11SKA'
@@ -91,11 +87,47 @@ logging.basicConfig(
 )# cache = Cache(app)
 
 
-
-
+# config = {
+#     "DEBUG": True,          # some Flask specific configs
+#     "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
+#     "CACHE_DEFAULT_TIMEOUT": 300
+# }
 app = Flask(__name__)
 CORS(app)
+# tell Flask to use the above defined config
+# app.config.from_mapping(config)
+# cache = Cache(app)
+
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+
+""" logs config """
+
+log_directory = 'logs'
+os.makedirs(log_directory, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+general_log_file = os.path.join(log_directory, 'general.log')
+error_log_file = os.path.join(log_directory, 'error.log')
+
+# General log handler
+general_handler = logging.FileHandler(general_log_file)
+general_handler.setLevel(logging.INFO)
+general_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Error log handler
+error_handler = logging.FileHandler(error_log_file)
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Adding handlers to the logger
+logger = logging.getLogger(__name__)
+logger.addHandler(general_handler)
+logger.addHandler(error_handler)
+
+
+
 
 ################ DICTIONARIES
 property_dict = {
@@ -1213,17 +1245,56 @@ def get_level_5_tokens(level_9_tokens):
         s2sphere.CellId.from_token(token).parent(5).to_token()
         for token in level_9_tokens
     ]
-    print(f'level_5_tokens {level_5_tokens}')
     return level_5_tokens 
 
+last_update_time = None
+# cached_weather_df = pd.DataFrame()  # Placeholder for cached data
+last_reload_time = None
+
+cached_weather_df_nldas = pd.DataFrame()
+last_reload_time_nldas = None
+
+cached_weather_df_ncep = pd.DataFrame()
+cached_weather_dirs_ncep= {}
+last_reload_time_ncep = None
+cache_ncep = {}
+region_weather_cache = {}
+region_last_reload_time = {}
+cached_day_files = {}
+cached_weather_files_ncep = {}
+
+
+base_path_nldas = '/mnt/md1/NLDAS/PARQUET_S2/'
 base_path_ncep = '/mnt/md1/NCEP/PARQUET_S2/'
-base_path_nldas = '/mnt/md1/NLDAS/PARQUETE_S2/'
+
+class FileChangeHandler(FileSystemEventHandler):
+    def __init__(self, reload_function):
+        self.reload_function = reload_function
+
+    def on_modified(self, event):
+        if event.src_path.endswith('.parquet'):
+            print(f"File modified: {event.src_path}")
+            self.reload_function()
+
+    def on_created(self, event):
+        if event.src_path.endswith('.parquet'):
+            print(f"File created: {event.src_path}")
+            self.reload_function()
+
+def start_file_monitoring(path, reload_function):
+    event_handler = FileChangeHandler(reload_function)
+    observer = Observer()
+    observer.schedule(event_handler, path, recursive=True)
+    observer_thread = threading.Thread(target=observer.start)
+    observer_thread.daemon = True
+    observer_thread.start()
+    print(f"Started monitoring {path} for changes")
 
 def reload_data_nldas(YYYY_str, MM_str):
     cached_weather_files_ncep = {}
     try:
         start_time = time.time()
-        month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
+        month_path = os.path.join(base_path_nldas, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
         
         for day_dir in os.listdir(month_path):
             day_path = os.path.join(month_path, day_dir)
@@ -1244,7 +1315,6 @@ def reload_data_ncep(YYYY_str, MM_str, Day_str):
         month_path = os.path.join(base_path_ncep, 's2_tokens_L5', 's2_tokens_L7', 's2_tokens_L9', f'Year={YYYY_str}', f'Month={MM_str}')
         
         for day_dir in os.listdir(month_path):
-            # print(day_dir)
             day_path = os.path.join(month_path, day_dir)
             if os.path.isdir(day_path):
                 day_files = [os.path.join(day_path, f) for f in os.listdir(day_path) if f.endswith('.parquet')]
@@ -1256,6 +1326,20 @@ def reload_data_ncep(YYYY_str, MM_str, Day_str):
         print(f"Failed to reload directories: {e}")
 
     return cached_weather_files_ncep
+
+# world = gpd.read_file('/home/rnaura/terrapipe/ne_110m_admin_0_countries.shp')
+
+
+# last_region = None
+# def determine_region(lat, lon):
+#     point = Point(lon, lat)
+#     # Finding the row in the dataframe where the point lies within the country's boundary
+#     country = world[world.contains(point)]
+#     if not country.empty:
+#         # Extracting the first row as the result
+#         return country.iloc[0]['SOVEREIGNT']  # or another column name if different
+#     else:
+#         return 'Unknown'
 
 
 def empty_response():
@@ -1297,24 +1381,49 @@ def empty_response():
     
     return weather_df_filtered
 
-from functools import wraps
-def memoize(func):
+
+def memoize_nldas(func):
     cache = {}
+    last_keys = {}
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        key = str(args) + str(kwargs)
+        key = (args, frozenset(kwargs.items()))
         if key not in cache:
+            print(f"NLDAS Cache miss for key: {key}")
             cache[key] = func(*args, **kwargs)
+            last_keys[key] = time.time()
+        else:
+            print(f"NLDAS Cache hit for key: {key}")
         return cache[key]
 
     return wrapper
 
+def memoize_ncep(func):
+    cache = {}
+    last_keys = {}
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        key = (args, frozenset(kwargs.items()))
+        if key not in cache:
+            print(f"NCEP Cache miss for key: {key}")
+            cache[key] = func(*args, **kwargs)
+            last_keys[key] = time.time()
+        else:
+            print(f"NCEP Cache hit for key: {key}")
+        return cache[key]
+
+    return wrapper
+
+
+
 def read_parquet_file(file):
     return pq.read_table(file)
 
-from shapely import wkt, geometry
-@memoize
+
+
+@memoize_nldas
 def getWeatherFromNLDAS(dtStr, agstack_geoid):
     
     """    
@@ -1378,7 +1487,7 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
     start_time_polygon = time.time()
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
-    polygon_duration = time.time() - start_time_polygon
+    # polygon_duration = time.time() - start_time_polygon
 
     # logging.info(f"Fetching and processing WKT polygon took {polygon_duration:.2f} seconds")
 
@@ -1428,6 +1537,10 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
 
         # Convert the 'time' column to ISO format using strftime
         weather_df['time'] = weather_df['time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+        
+        weather_df['Month'] = weather_df['Month'].astype('Int64')
+        weather_df['Day'] = weather_df['Day'].astype('Int64')
+        weather_df['Year'] = weather_df['Year'].astype('Int64')
 
     if weather_df.empty:
         weather_df = pd.DataFrame(empty_response())
@@ -1441,7 +1554,6 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
 
 
 
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s'
 # # Custom cache key function
 # def make_cache_key():
 #     args = request.args
@@ -1460,9 +1572,11 @@ def getWeatherFromNLDAS(dtStr, agstack_geoid):
 #    user_data = request.args
 #    return ",".join([f"{key}={value}" for key, value in user_data.items()])
 
+
+
+
 # @cache.cached(timeout=5000000, make_cache_key=make_key)
-# @log_time_and_calls
-@memoize
+@memoize_ncep
 def getWeatherFromNCEP(dtStr, agstack_geoid):
     # Extract date and geoid from the request
     dtStr = request.args.get('date')
@@ -1571,7 +1685,6 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
                     (weather_df['Month'].astype(int) == int(MM_str)) & 
                     (weather_df['Day'].astype(int) == int(DD_str))]
 
-    print(f'weather_df--{weather_df}')
     if len(weather_df) > 1:
         # Convert the time column to datetime first, if it isn't already
         weather_df['time'] = pd.to_datetime(weather_df['time'], errors='coerce')
@@ -1588,6 +1701,10 @@ def getWeatherFromNCEP(dtStr, agstack_geoid):
 
         # Convert the 'time' column to ISO format using strftime
         weather_df['time'] = weather_df['time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+        
+        weather_df['Month'] = weather_df['Month'].astype('Int64')
+        weather_df['Day'] = weather_df['Day'].astype('Int64')
+        weather_df['Year'] = weather_df['Year'].astype('Int64')
 
     # Return empty response if no data is found
     if weather_df.empty:
@@ -1994,12 +2111,12 @@ def getNLDASData():
     date = request.args.get('date', '')
     # Start timing for cache access
     start_time_cache_access = time.time()
-
-    if geoid in cache_nldas:
+    cache_key_nldas = ('NLDAS',geoid, date)
+    if cache_key_nldas in cache_nldas:
         # Log cache access time
         # cache_access_duration = time.time() - start_time_cache_access
         # logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify(cache_nldas[geoid])
+        return jsonify(cache_nldas[cache_key_nldas])
 
     # Data not in cache, fetch from NCEP
     weather_df = getWeatherFromNLDAS(date, geoid)
@@ -2014,7 +2131,7 @@ def getNLDASData():
     json_data = weather_df.to_dict(orient='records')
 
     # Cache the response
-    cache_nldas[geoid] = json_data
+    cache_nldas[cache_key_nldas] = json_data
 
     # Log the completion of the request
     logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
@@ -2030,12 +2147,12 @@ def getNCEPWeatherData():
 
     # Start timing for cache access
     start_time_cache_access = time.time()
-
-    if geoid in cache_ncep:
+    cache_key_ncep = ('NCEP',geoid, date)
+    if cache_key_ncep in cache_ncep:
         # Log cache access time
         cache_access_duration = time.time() - start_time_cache_access
         logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify(cache_ncep[geoid])
+        return jsonify(cache_ncep[cache_key_ncep])
 
     # Data not in cache, fetch from NCEP
     weather_df = getWeatherFromNCEP(date, geoid)
@@ -2050,7 +2167,7 @@ def getNCEPWeatherData():
     json_data = weather_df.to_dict(orient='records')
 
     # Cache the response
-    cache_ncep[geoid] = json_data
+    cache_ncep[cache_key_ncep] = json_data
 
     # Log the completion of the request
     logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
@@ -2111,8 +2228,8 @@ for extra_dir in extra_dirs:
 
 if __name__ == '__main__':
     # extra_files = [updated_data_available_file,]
-    logging.basicConfig(level=logging.INFO)
-    app.run(debug=True, extra_files=extra_files)
+
+    app.run(debug=False, extra_files=extra_files)
 
 
 
