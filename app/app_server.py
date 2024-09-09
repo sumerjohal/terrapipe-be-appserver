@@ -2295,7 +2295,7 @@ def api_ticket_response():
     }
 
 def getWeatherFromNCEP(agstack_geoid, dtStr):
-    filePath = '/mnt/md1/NCEP/PARQUET_S2_Test1/'
+    filePath = '/mnt/md2/NCEP/PARQUET_S2/'
     tok = dtStr.split('-')
     print(tok)
     YYYY_str = tok[0]
@@ -2313,59 +2313,62 @@ def getWeatherFromNCEP(agstack_geoid, dtStr):
     start_time = time.time()
     # Get the list of S2 indices and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+    print(s2_index__L5_list)
 
-    try:
-        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                        if os.path.exists(filePath + 's2_token_L5=' + x)]
-        if list_of_5_paths  == []:
-            return empty_response()
-        weather_datasets = []
-        for x in list_of_5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+                                    
+    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                    if os.path.exists(filePath + 's2_token_L5=' + x)]
+    if list_of_5_paths  == []:
+        return empty_response()
+    weather_datasets = []
+    for x in list_of_5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-        w_all = pd.DataFrame()
-        for weatherDataset in weather_datasets:
-            # Use UTC date components for filtering
-            YYYY_list = [utc_dt.year]
-            MM_list = [str(utc_dt.month).zfill(2)]
-            DD_list = [str(utc_dt.day).zfill(2)]
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        # Use UTC date components for filtering
+        # YYYY_list = [utc_dt.year]
+        # MM_list = [str(utc_dt.month).zfill(2)]
+        # DD_list = [str(utc_dt.day).zfill(2)]
+        yrStr=  YYYY_str
+        moStr = MM_str
+        dtStr = DD_str
 
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
-                )
-            ).to_pandas()
-            if not weather_df.empty:
-                weather_df.dropna(inplace=True)
-            # Convert date fields to a single Date column
-            weather_df['YYYY'] = weather_df['Year'].astype(str)
-            weather_df['MM'] = weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD'] = weather_df['Day'].astype(str).str.zfill(2)
-            weather_df['time'] = pd.to_datetime(weather_df['YYYY'] + '-' + weather_df['MM'] + '-' + weather_df['DD']).dt.tz_localize('UTC')
+        YYYY_list=[yrStr]
+        MM_list=[moStr]
+        DD_list=[dtStr]
+        weather_df = weatherDataset.to_table(
+            filter=(
+                ds.field('Year').isin(YYYY_list) &
+                ds.field('Month').isin(MM_list) &
+                ds.field('Day').isin(DD_list)
+            )
+        ).to_pandas()
+        # if not weather_df.empty:
+        #     weather_df.dropna(inplace=True)
+        # Convert date fields to a single Date column
+        weather_df['YYYY'] = weather_df['Year'].astype(str)
+        weather_df['MM'] = weather_df['Month'].astype(str).str.zfill(2)
+        weather_df['DD'] = weather_df['Day'].astype(str).str.zfill(2)
+        # weather_df['time'] = pd.to_datetime(weather_df['YYYY'] + '-' + weather_df['MM'] + '-' + weather_df['DD']).dt.tz_localize('UTC')
 
-            # Drop the original date columns
-            weather_df = weather_df.drop(columns=['YYYY', 'MM', 'DD'], axis=1)
+        # Drop the original date columns
+        weather_df = weather_df.drop(columns=['YYYY', 'MM', 'DD'], axis=1)
 
-            
-            # Calculate the mean only for numeric columns
-            numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
-            w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            
-            # Retain the Date column in the result
-            w_df['time'] = weather_df['time'].iloc[0]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-        if len(w_all) > 0:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(['time']).mean())
-            w_ret.reset_index(inplace=True)
         
-    
-    except Exception as e:
-        print(e)
-        w_ret = empty_response()
+        # Calculate the mean only for numeric columns
+        numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+        w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+        
+        # Retain the Date column in the result
+        w_df['time'] = weather_df['time']
+        w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+    if len(w_all) > 0:
+        # Take the average of the columns
+        w_ret = pd.DataFrame(w_all.groupby(['time']).mean())
+        w_ret.reset_index(inplace=True)
+
 
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -2391,58 +2394,54 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
     # Get the list of S2 indices and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
     print(f'token---{s2_index__L5_list}')
-    try:
-        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                        if os.path.exists(filePath + 's2_token_L5=' + x)]
-        if list_of_5_paths  == []:
-            return empty_response()
-        weather_datasets = []
-        for x in list_of_5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-
-        w_all = pd.DataFrame()
-        for weatherDataset in weather_datasets:
-            # Use UTC date components for filtering
-            YYYY_list = [utc_dt.year]
-            MM_list = [str(utc_dt.month).zfill(2)]
-            DD_list = [str(utc_dt.day).zfill(2)]
-
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
-                )
-            ).to_pandas()
-            if not weather_df.empty:
-                weather_df.dropna(inplace=True)
-            # Convert date fields to a single Date column
-            weather_df['YYYY'] = weather_df['Year'].astype(str)
-            weather_df['MM'] = weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD'] = weather_df['Day'].astype(str).str.zfill(2)
-            weather_df['time'] = pd.to_datetime(weather_df['YYYY'] + '-' + weather_df['MM'] + '-' + weather_df['DD']).dt.tz_localize('UTC')
-
-            # Drop the original date columns
-            weather_df = weather_df.drop(columns=['YYYY', 'MM', 'DD'], axis=1)
-
-            
-            # Calculate the mean only for numeric columns
-            numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
-            w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            
-            # Retain the Date column in the result
-            w_df['time'] = weather_df['time'].iloc[0]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-        if len(w_all) > 0:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(['time']).mean())
-            w_ret.reset_index(inplace=True)
-        
     
-    except Exception as e:
-        print(e)
-        w_ret = empty_response()
+    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                    if os.path.exists(filePath + 's2_token_L5=' + x)]
+    if list_of_5_paths  == []:
+        return empty_response()
+    weather_datasets = []
+    for x in list_of_5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        # Use UTC date components for filtering
+        YYYY_list = [utc_dt.year]
+        MM_list = [str(utc_dt.month).zfill(2)]
+        DD_list = [str(utc_dt.day).zfill(2)]
+
+        weather_df = weatherDataset.to_table(
+            filter=(
+                ds.field('Year').isin(YYYY_list) &
+                ds.field('Month').isin(MM_list) &
+                ds.field('Day').isin(DD_list)
+            )
+        ).to_pandas()
+        # if not weather_df.empty:
+        #     weather_df.dropna(inplace=True)
+        # Convert date fields to a single Date column
+        weather_df['YYYY'] = weather_df['Year'].astype(str)
+        weather_df['MM'] = weather_df['Month'].astype(str).str.zfill(2)
+        weather_df['DD'] = weather_df['Day'].astype(str).str.zfill(2)
+        # weather_df['time'] = pd.to_datetime(weather_df['YYYY'] + '-' + weather_df['MM'] + '-' + weather_df['DD']).dt.tz_localize('UTC')
+
+        # Drop the original date columns
+        weather_df = weather_df.drop(columns=['YYYY', 'MM', 'DD'], axis=1)
+
+        
+        # Calculate the mean only for numeric columns
+        numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+        w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+        
+        # Retain the Date column in the result
+        w_df['time'] = weather_df['time']
+        w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+    if len(w_all) > 0:
+        # Take the average of the columns
+        w_ret = pd.DataFrame(w_all.groupby(['time']).mean())
+        w_ret.reset_index(inplace=True)
+    
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
