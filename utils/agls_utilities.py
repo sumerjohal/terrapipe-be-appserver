@@ -12924,6 +12924,7 @@ def getEtoFromNCEP(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     
     return w_all, w_ret, time_elapsed
 
+'''
 ################################################################
 ################################################################	
 #********** DATA
@@ -13142,6 +13143,7 @@ gdf_L = getAllLandsatScenePolygons()
 S_gdf = gdf_S.copy() #for same call, different name
 print('Done!')
 
+'''
 
 os.environ['ASSET_REGISTRY_BASE_URL'] = 'https://api-ar.agstack.org/'
 

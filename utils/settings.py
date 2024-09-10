@@ -50,10 +50,11 @@ newcolors = np.vstack((top(np.linspace(0, 1, 64)),bottom(np.linspace(0, 1, 256))
 zoom5 = ListedColormap(newcolors, name='Zoom5')
 
 #********* CHANGE FOR VISHNU
-data_dir = '/home/rnaura/terrapipe/shapefiles/'
+# data_dir = '/home/rnaura/terrapipe/shapefiles/'
+data_dir = '/home/rajat/Downloads/Rnaura_Work/terrapipe-dataserver/shapefiles/'
 isr_shapefile = data_dir + 'ISR_adm0.shp'
 
-aus_data_dir = '//home/rnaura/terrapipe/shapefiles/AUS_ADMIN_BOUNDARIES/State Boundaries FEBRUARY 2020/Standard/'
+aus_data_dir = '/home/rnaura/terrapipe/shapefiles/AUS_ADMIN_BOUNDARIES/State Boundaries FEBRUARY 2020/Standard/'
 worldShpFile = '/home/rnaura/terrapipe/data/99bfd9e7-bb42-4728-87b5-07f8c8ac631c2020328-1-1vef4ev.lu5nk.shp'
 
 
@@ -61,14 +62,18 @@ outDir = '/mnt/md0/CONFIG/JAINLOGIC_MONITORED/'
 tmpDir = '/home/sumer/my_project_dir/tmp/'
 
 sentinelRawFolder = '/mnt/md1/SENTINEL/RAW/'
-sentinelProcFolder = '/mnt/md0/SENTINEL/PROCESSED/'
+# sentinelProcFolder = '/mnt/md0/SENTINEL/PROCESSED/'
+sentinelProcFolder = '/home/rajat/Downloads/Rnaura_Work/mnt/md0/SENTINEL/PROCESSED/'
+
 sentinelProcFolder_NIROG = '/mnt/md1/SENTINEL/NIROG/'
 sentinel_MULTIBAND_ProcFolder = '/mnt/md1/SENTINEL/MULTIBAND/'
 sentinel_EXTENSIONS_ProcFolder = '/mnt/md0/SENTINEL_EXTENSIONS/PROCESSED'
 
 
 landsatRawFolder = '/mnt/md1/LANDSAT8/RAW/'
-landsatProcFolder = '/mnt/md1/LANDSAT8/PROCESSED/'
+# landsatProcFolder = '/mnt/md1/LANDSAT8/PROCESSED/'
+landsatProcFolder = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/LANDSAT8/PROCESSED/'
+
 landsatProcFolder_NIROG = '/mnt/md1/LANDSAT8/NIROG/'
 
 configPath = '/mnt/md0/CONFIG/'
