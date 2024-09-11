@@ -3170,6 +3170,7 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
     start_time = time.time()
     # Get the list of S2 indices and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+    print(f'token---{s2_index__L5_list}')
     
     list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                     if os.path.exists(filePath + 's2_token_L5=' + x)]
@@ -3212,6 +3213,7 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
                 w_df['aifstime_utc'] = pd.NaT
 
             w_all = pd.concat([w_all, w_df], ignore_index=True)
+    print("========w_all======",w_all)
 
     if not w_all.empty:
         w_all = w_all.fillna(0)
@@ -3419,7 +3421,7 @@ def getWeatherFromAUSFORECASTED(agstack_geoid, dtStr):
 
                 w_all = pd.concat([w_all, w_df], ignore_index=True)
 
-
+    print("=======w_all======", w_all)
     if not w_all.empty:
         w_all = w_all.fillna(0)
         # Take the average of the columns
@@ -4337,14 +4339,6 @@ def getGHCNDWeatherData():
     geoid = request.args['geoid']
     date = request.args.get('date', '')
 
-    # Start timing for cache access
-    start_time_cache_access = time.time()
-    cache_key_ghcnd = ('GHCND',geoid, date)
-    if cache_key_ghcnd in cache_ghcnd:
-        # Log cache access time
-        cache_access_duration = time.time() - start_time_cache_access
-        logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify({"data": cache_ghcnd[cache_key_ghcnd], "metadata": meta_data_response(),"metadata_global_description":meta_data_with_description()})
 
     # Data not in cache, fetch from GHCND
     weather_df = getWeatherFromGHCND(geoid, date)
@@ -4352,14 +4346,14 @@ def getGHCNDWeatherData():
     try:
         weather_df.reset_index(inplace=True)
     except:
-        logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
+        # logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
         pass
 
     # Convert DataFrame to a dictionary
     json_data = weather_df.to_dict(orient='records')
 
     # Cache the response
-    cache_ghcnd[cache_key_ghcnd] = json_data
+    # cache_ghcnd[cache_key_ghcnd] = json_data
 
     # Log the completion of the request
     # logging.info(f"Data for geoid: {geoid} fetched from GHCND and cached")
