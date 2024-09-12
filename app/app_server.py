@@ -3146,11 +3146,11 @@ def getWeatherFromNOAAFORECASTED(dtStr, agstack_geoid):
     return w_ret
 
 # GHCND
-def getWeatherFromGHCND(agstack_geoid, dtStr):
+def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
     # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
     # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
     filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
-    tok = dtStr.split('-')
+    tok = start_date.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1]
     DD_str = tok[2]
@@ -3159,8 +3159,16 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
 
-    date_range = [utc_dt + timedelta(days=i) for i in range(8)]
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
     
+    w_ret = pd.DataFrame()
     s1_time_start = time.time()
     # Fetch WKT polygon and extract latitude and longitude
     wkt_polygon = fetchWKT(agstack_geoid)
@@ -3181,36 +3189,43 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
 
     w_all = pd.DataFrame()
     for weatherDataset in weather_datasets:
-        
-        for current_date in date_range:
-            YYYY_list = [current_date.year]
-            MM_list = [str(current_date.month).zfill(2)]
-            DD_list = [str(current_date.day).zfill(2)]
+        if end_date is not None:
+            # Filter between start and end date
             weather_df = weatherDataset.to_table(
                 filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
                 )
             ).to_pandas()
+        elif end_date is None:
+            # Filter for start date only
+            weather_df = weatherDataset.to_table(
+                filter=(
+                    (ds.field('Year') == int(YYYY_str)) &
+                    (ds.field('Month') == int(MM_str)) &
+                    (ds.field('Day') == int(DD_str))
+                )
+            ).to_pandas()
+    
 
-            w_all = pd.concat([w_all, weather_df], ignore_index=True)
-        if len(w_all)> 0:
-            w_all = w_all.fillna(0)
-            # Convert 'time' column to datetime format if it isn't already
-            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
+        w_all = pd.concat([w_all, weather_df], ignore_index=True)
+    if len(w_all)> 0:
+        w_all = w_all.fillna(0)
+        # Convert 'time' column to datetime format if it isn't already
+        w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
 
-            # Ensure all numeric columns are converted to numeric type
-            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+        # Ensure all numeric columns are converted to numeric type
+        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-            # Group by 'time' and calculate the mean for each group
-            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+        # Group by 'time' and calculate the mean for each group
+        w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
 
-            # Ensure 'Year', 'Month', and 'Day' are included in the response
-            w_ret['Year'] = w_ret['Year'].astype(int)
-            w_ret['Month'] = w_ret['Month'].astype(int)
-            w_ret['Day'] = w_ret['Day'].astype(int)
+        # Ensure 'Year', 'Month', and 'Day' are included in the response
+        w_ret['Year'] = w_ret['Year'].astype(int)
+        w_ret['Month'] = w_ret['Month'].astype(int)
+        w_ret['Day'] = w_ret['Day'].astype(int)
     #     if not weather_df.empty:
     #         weather_df['aifstime_utc'] = pd.to_datetime(
     #             weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
@@ -3229,7 +3244,7 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
     #             w_df['aifstime_utc'] = pd.NaT
 
     #         w_all = pd.concat([w_all, w_df], ignore_index=True)
-    # print("========w_all======",w_all)
+        # print("========w_all======",w_all)
 
     # if not w_all.empty:
     #     w_all = w_all.fillna(0)
@@ -3238,11 +3253,6 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
     #     w_ret.reset_index(inplace=True)
     # else:
     #     w_ret = pd.DataFrame()
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-
-    print(f'total time elapsed --{time_elapsed}')
 
     return w_ret
 """
@@ -4335,11 +4345,12 @@ cache_ghcnd = {}
 @app.route('/getGHCND')
 def getGHCNDWeatherData():
     geoid = request.args['geoid']
-    date = request.args.get('date', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', None)
 
 
-    # Data not in cache, fetch from GHCND
-    weather_df = getWeatherFromGHCND(geoid, date)
+    
+    weather_df = getWeatherFromGHCND(geoid, start_date,end_date)
     
     try:
         weather_df.reset_index(inplace=True)
