@@ -3067,136 +3067,82 @@ def getWeatherFromNOAA(dtStr, agstack_geoid):
 """
 
 # NOAA_FORECASTED
-@memoize_noaa_forecasted
+# @memoize_noaa_forecasted
 def getWeatherFromNOAAFORECASTED(dtStr, agstack_geoid):
-    # logging.info(f"Data Processing started for geoid: {agstack_geoid}, date: {dtStr}")
+    filePath = "/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/"
 
     # Parse the date
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1].zfill(2)
     DD_str = tok[2]
-
-    global cached_weather_files_noaa_forecasted, last_reload_time_noaa_forecasted, cached_weather_df_noaa_forecasted
-    start_time_total = time.time()
-
-    day_key = f'Day={DD_str}'
-
-    # Reload data if necessary
-    start_time_reload = time.time()
-    day_data = reload_data_noaa_forecasted(YYYY_str, MM_str, DD_str)
-    reload_duration = time.time() - start_time_reload
-    # logging.info(f"Data loading into memory took {reload_duration:.2f} seconds")
-
-    # Read and combine Parquet files using threading
-    try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            tables = list(executor.map(read_parquet_file, day_data[day_key]))
-
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df_noaa_forecasted = combined_table.to_pandas()
-
-        # Remove NaN values
-        cached_weather_df_noaa_forecasted.dropna(inplace=True)
-
-        # Set multi-level index for fast lookup
-        cached_weather_df_noaa_forecasted.set_index(['s2_tokens_l9', 's2_tokens_l7', 's2_tokens_l5'], inplace=True)
-    except Exception as e:
-        logging.error(f"Error reading Parquet files: {e}")
-        return empty_response()
     
+    start_time = time.time()
+
+
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    date_range = [utc_dt + timedelta(days=i) for i in range(8)]
+
+    w_ret = pd.DataFrame()
     # Fetch WKT polygon and extract lat/lon
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
 
     # Filter data by level 9 tokens
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
-    s2_index__L9_list = [str(token) for token in s2_index__L9_list]
+    s2_index__L5_list,cell_id = get_s2_cellids_and_token_list(5, [lat], [lon])
+    
+    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+            if os.path.exists(filePath + 's2_token_L5=' + x)]
 
-    # Filter by level 9 tokens
-    try:
-        weather_df = cached_weather_df_noaa_forecasted.loc[
-            (s2_index__L9_list, slice(None), slice(None))
-        ]
-    except KeyError:
-        weather_df = pd.DataFrame()
+    if not list_of_5_paths:
+        return empty_response()
+    
+    weather_datasets = []
+    for x in list_of_5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        for current_date in date_range:
+            YYYY_list = [current_date.year]
+            MM_list = [str(current_date.month).zfill(2)]
+            DD_list = [str(current_date.day).zfill(2)]
 
-    # If level 9 data is empty, filter by level 7 tokens
-    if weather_df.empty:
-        level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-        try:
-            weather_df = cached_weather_df_noaa_forecasted.loc[
-                (slice(None), level_7_tokens, slice(None))
-            ]
-        except KeyError as e:
-            print(f'{e} at level 7')
-            weather_df = pd.DataFrame()
+            weather_df = weatherDataset.to_table(
+                filter=(
+                    ds.field('Year').isin(YYYY_list) &
+                    ds.field('Month').isin(MM_list) &
+                    ds.field('Day').isin(DD_list)
+                )
+            ).to_pandas()
             
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+    
+    if len(w_all) > 0:
+        w_all = w_all.fillna(0)
+        # Convert 'time' column to datetime format if it isn't already
+        w_all['TS'] = pd.to_datetime(w_all['TS'])
 
-    # If level 7 data is empty, filter by level 5 tokens
-    if weather_df.empty:
-        level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-        try:
-            weather_df = cached_weather_df_noaa_forecasted.loc[
-                (slice(None), slice(None), level_5_tokens)
-            ]
-        except KeyError as e:
-            print(f'{e} at level 5')
-            weather_df = pd.DataFrame()
+        # Ensure all numeric columns are converted to numeric type
+        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-    # Filter the DataFrame by date
-    try:
-        weather_df = weather_df[(weather_df['Year'].astype(int) == int(YYYY_str)) & 
-                    (weather_df['Month'].astype(int) == int(MM_str)) & 
-                    (weather_df['Day'].astype(int) == int(DD_str))]
-    except Exception as e:
-        print(e)
+        # Group by 'time' and calculate the mean for each group
+        w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
 
-    # Process time series data if multiple entries exist
-    if len(weather_df) > 1:
-   
-        # Convert 'TS' to datetime
-        weather_df['TS'] = pd.to_datetime(weather_df['TS'], errors='coerce')
+        # Ensure 'Year', 'Month', and 'Day' are included in the response
+        w_ret['Year'] = w_ret['Year'].astype(int)
+        w_ret['Month'] = w_ret['Month'].astype(int)
+        w_ret['Day'] = w_ret['Day'].astype(int)
+        
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
 
-        # Identify numeric columns for aggregation
-        numeric_cols = weather_df.select_dtypes(include=['number']).columns
-        non_numeric_cols = weather_df.select_dtypes(exclude=['number']).columns
-
-        # Aggregate numeric columns by 'TS'
-        weather_df_numeric = weather_df[numeric_cols].groupby(weather_df['TS']).mean().reset_index()
-
-        # Merge non-numeric columns
-        weather_df_non_numeric = weather_df[non_numeric_cols].drop_duplicates(subset='TS')
-        weather_df = pd.merge(weather_df_numeric, weather_df_non_numeric, on='TS', how='left')
-
-        # Ensure 'Year', 'Month', 'Day' columns are present after aggregation
-        weather_df['Year'] = weather_df['TS'].dt.year
-        weather_df['Month'] = weather_df['TS'].dt.month
-        weather_df['Day'] = weather_df['TS'].dt.day
-
-        # Convert Year, Month, Day columns to integers
-        weather_df['Year'] = weather_df['Year'].astype(int)
-        weather_df['Month'] = weather_df['Month'].astype(int)
-        weather_df['Day'] = weather_df['Day'].astype(int)
-
-        # Format 'TS' column
-        # weather_df['TS'] = weather_df['TS'].dt.strftime('%Y-%m-%dT%H:%M:%S')
-
-    # Return empty response if no data is found
-    if weather_df.empty:
-        weather_df = pd.DataFrame(empty_response())
-    try:
-        weather_df = weather_df.drop('geometry',axis=1)
-        weather_df = weather_df.drop('region',axis=1)
-    except:
-        pass
-    # weather_df = weather_df[''].drop('region',axis=1)
-    logging.info(f"NOAA FORECASTED Data for geoid {agstack_geoid} on {dtStr}: {weather_df}")
-    end_time_total = time.time()
-    total_duration = end_time_total - start_time_total
-    logging.info(f'Total function execution took {total_duration:.2f} seconds')
-
-    return weather_df
+    print(f'total time elapsed --{time_elapsed}')
+    
+    return w_ret
 
 # GHCND
 def getWeatherFromGHCND(agstack_geoid, dtStr):
@@ -3273,6 +3219,7 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
         w_ret = pd.DataFrame()
 
     return w_ret
+
 """
 @memoize_ghcnd
 def getWeatherFromGHCND(dtStr, agstack_geoid):
