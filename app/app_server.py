@@ -2387,39 +2387,50 @@ def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
 
 
 def getWeatherFromNLDAS(agstack_geoid, dtStr):
-    filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
+    filePath = '/mnt/md2/NLDAS/PARQUET_S2/'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1]
     DD_str = tok[2]
+    
+
 
     # Create a datetime object and localize it to UTC
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
 
+    # Generate the next 7 days
+    date_range = [utc_dt + timedelta(days=i) for i in range(8)]
+    
     s1_time_start = time.time()
-    # Fetch WKT polygon and extract latitude and longitude
+    w_ret = pd.DataFrame()
+    
+        # Fetch WKT polygon and extract latitude and longitude
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
     start_time = time.time()
     # Get the list of S2 indices and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-    print(f'token---{s2_index__L5_list}')
-    try:
-        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                        if os.path.exists(filePath + 's2_token_L5=' + x)]
-        if list_of_5_paths  == []:
-            return empty_response()
-        weather_datasets = []
-        for x in list_of_5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                    if os.path.exists(filePath + 's2_token_L5=' + x)]
+    print(f'token---{list_of_5_paths}')
+    # if list_of_5_paths  == []:
+    #     return empty_response()
+    weather_datasets = []
+    for x in list_of_5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-        w_all = pd.DataFrame()
-        for weatherDataset in weather_datasets:
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        print('step1')
+        for current_date in date_range:
+            
             # Use UTC date components for filtering
-            YYYY_list = [utc_dt.year]
-            MM_list = [str(utc_dt.month).zfill(2)]
-            DD_list = [str(utc_dt.day).zfill(2)]
+            YYYY_list = [current_date.year]
+            MM_list = [str(current_date.month).zfill(2)]
+            DD_list = [str(current_date.day).zfill(2)]
+        
+        
 
             weather_df = weatherDataset.to_table(
                 filter=(
@@ -2428,36 +2439,28 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
                     ds.field('Day').isin(DD_list)
                 )
             ).to_pandas()
-            if not weather_df.empty:
-                weather_df.dropna(inplace=True)
-            # Convert date fields to a single Date column
-            weather_df['YYYY'] = weather_df['Year'].astype(str)
-            weather_df['MM'] = weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD'] = weather_df['Day'].astype(str).str.zfill(2)
-            weather_df['time'] = pd.to_datetime(weather_df['YYYY'] + '-' + weather_df['MM'] + '-' + weather_df['DD']).dt.tz_localize('UTC')
+            # print(weather_df)
+            # if not weather_df.empty:
+            #     weather_df.dropna(inplace=True)
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+    print(w_all)
+    if len(w_all) > 0:
+        # Convert 'time' column to datetime format if it isn't already
+        w_all['time'] = pd.to_datetime(w_all['time'])
 
-            # Drop the original date columns
-            weather_df = weather_df.drop(columns=['YYYY', 'MM', 'DD'], axis=1)
+        # Ensure all numeric columns are converted to numeric type
+        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-            
-            # Calculate the mean only for numeric columns
-            numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
-            w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            
-            # Retain the Date column in the result
-            w_df['time'] = weather_df['time'].iloc[0]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
+        # Group by 'time' and calculate the mean for each group
+        w_ret = w_all.groupby('time').mean(numeric_only=True).reset_index()
 
-        if len(w_all) > 0:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(['time']).mean())
-            w_ret.reset_index(inplace=True)
-        
+        # Ensure 'Year', 'Month', and 'Day' are included in the response
+        w_ret['Year'] = w_ret['Year'].astype(int)
+        w_ret['Month'] = w_ret['Month'].astype(int)
+        w_ret['Day'] = w_ret['Day'].astype(int)
     
-    except Exception as e:
-        print(e)
-        w_ret = empty_response()
-    
+
     end_time = time.time()
     time_elapsed = (end_time - start_time)
 
@@ -4137,30 +4140,22 @@ def getNLDASData():
     date = request.args.get('date', '')
     # Start timing for cache access
     start_time_cache_access = time.time()
-    cache_key_nldas = ('NLDAS',geoid, date)
-    if cache_key_nldas in cache_nldas:
-        # Log cache access time
-        # cache_access_duration = time.time() - start_time_cache_access
-        # logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify({"data": cache_nldas[cache_key_nldas], "metadata": meta_data_response(),"metadata-description":meta_data_with_description()})
-
+    
     # Data not in cache, fetch from NCEP
     weather_df = getWeatherFromNLDAS(geoid,date)
     
     try:
         weather_df.reset_index(inplace=True)
     except:
-        logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
+        # logging.warning(f"Resetting index failed for dataframes with geoid: {geoid}")
         pass
 
     # Convert DataFrame to a dictionary
     json_data = weather_df.to_dict(orient='records')
 
-    # Cache the response
-    cache_nldas[cache_key_nldas] = json_data
 
     # Log the completion of the request
-    logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
+    # logging.info(f"Data for geoid: {geoid} fetched from NCEP and cached")
     response = {
         "data": json_data,
         "metadata": meta_data_response(),
