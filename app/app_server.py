@@ -2307,16 +2307,17 @@ def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
         utc_end_dt = pytz.utc.localize(end_local_dt)
 
     s1_time_start = time.time()
-    
-    # Fetch WKT polygon and extract latitude and longitude
-    wkt_polygon = fetchWKT(agstack_geoid)
-    lat, lon = extractLatLonFromWKT(wkt_polygon)
-    start_time = time.time()
-    
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-
+    w_ret = pd.DataFrame()
     try:
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+
+    
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                            if os.path.exists(filePath + 's2_token_L5=' + x)]
         if list_of_5_paths == []:
@@ -2337,6 +2338,7 @@ def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
                         (ds.field('Day') >= DD_str) & (ds.field('Day') <= end_DD_str)
                     )
                 ).to_pandas()
+                w_all = pd.concat([w_all, weather_df], ignore_index=True)
             elif end_date is None:
                 # Filter for start date only
                 weather_df = weatherDataset.to_table(
@@ -2347,6 +2349,7 @@ def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
                     )
                 ).to_pandas()
 
+                w_all = pd.concat([w_all, weather_df], ignore_index=True)
             if not weather_df.empty:
                 weather_df.dropna(inplace=True)
 
@@ -2354,7 +2357,6 @@ def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
             # print(weather_df['time'].tail())
             # print(weather_df.dtypes)
             # Concatenate to the main DataFrame
-            w_all = pd.concat([w_all, weather_df], ignore_index=True)
 
         if len(w_all) > 0:
             # Convert 'time' column to datetime format if it isn't already
@@ -4173,13 +4175,9 @@ cache_ncep = {}
 @app.route('/getNCEP')
 def getNCEPWeatherData():
     geoid = request.args['geoid']
-    start_date = request.args.get('date', '')
+    start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', None)
 
-    # Check if data is in cache
-    cache_key_ncep = ('NCEP', geoid, start_date, end_date)
-    if cache_key_ncep in cache_ncep:
-        return jsonify({"data": cache_ncep[cache_key_ncep], "metadata": meta_data_response(), "metadata-description": meta_data_with_description()})
 
     # Fetch data from NCEP
     if end_date is not None:
@@ -4194,9 +4192,6 @@ def getNCEPWeatherData():
 
     # Convert DataFrame to JSON
     json_data = weather_df.to_dict(orient='records')
-
-    # Cache the response
-    cache_ncep[cache_key_ncep] = json_data 
 
     response = {
         "data": json_data,
