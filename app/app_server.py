@@ -2406,61 +2406,65 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
     w_ret = pd.DataFrame()
     
         # Fetch WKT polygon and extract latitude and longitude
-    wkt_polygon = fetchWKT(agstack_geoid)
-    lat, lon = extractLatLonFromWKT(wkt_polygon)
-    start_time = time.time()
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                    if os.path.exists(filePath + 's2_token_L5=' + x)]
-    print(f'token---{list_of_5_paths}')
-    # if list_of_5_paths  == []:
-    #     return empty_response()
-    weather_datasets = []
-    for x in list_of_5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    try:
 
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        print('step1')
-        for current_date in date_range:
-            
-            # Use UTC date components for filtering
-            YYYY_list = [current_date.year]
-            MM_list = [str(current_date.month).zfill(2)]
-            DD_list = [str(current_date.day).zfill(2)]
         
-        
-
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
-                )
-            ).to_pandas()
-            # print(weather_df)
-            # if not weather_df.empty:
-            #     weather_df.dropna(inplace=True)
-            w_all = pd.concat([w_all, weather_df], ignore_index=True)
-    print(w_all)
-    if len(w_all) > 0:
-        # Convert 'time' column to datetime format if it isn't already
-        w_all['time'] = pd.to_datetime(w_all['time'])
-
-        # Ensure all numeric columns are converted to numeric type
-        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
-
-        # Group by 'time' and calculate the mean for each group
-        w_ret = w_all.groupby('time').mean(numeric_only=True).reset_index()
-
-        # Ensure 'Year', 'Month', and 'Day' are included in the response
-        w_ret['Year'] = w_ret['Year'].astype(int)
-        w_ret['Month'] = w_ret['Month'].astype(int)
-        w_ret['Day'] = w_ret['Day'].astype(int)
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
     
+        #     return empty_response()
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            
+            for current_date in date_range:
+                
+                # Use UTC date components for filtering
+                YYYY_list = [current_date.year]
+                MM_list = [str(current_date.month).zfill(2)]
+                DD_list = [str(current_date.day).zfill(2)]
+            
+            
+
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        ds.field('Year').isin(YYYY_list) &
+                        ds.field('Month').isin(MM_list) &
+                        ds.field('Day').isin(DD_list)
+                    )
+                ).to_pandas()
+                # print(weather_df)
+                # if not weather_df.empty:
+                #     weather_df.dropna(inplace=True)
+                w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        
+        if len(w_all) > 0:
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['time'] = pd.to_datetime(w_all['time'])
+
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('time').mean(numeric_only=True).reset_index()
+
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+        
+    except Exception as e:
+        print(f'Error -{e}')
+        w_ret = empty_response()
     end_time = time.time()
     time_elapsed = (end_time - start_time)
 
