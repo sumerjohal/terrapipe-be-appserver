@@ -3068,6 +3068,7 @@ def getWeatherFromNOAA(dtStr, agstack_geoid):
 
 # NOAA_FORECASTED
 # @memoize_noaa_forecasted
+# @memoize_noaa_forecasted
 def getWeatherFromNOAAFORECASTED(dtStr, agstack_geoid):
     filePath = "/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/"
 
@@ -3158,6 +3159,8 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
 
+    date_range = [utc_dt + timedelta(days=i) for i in range(8)]
+    
     s1_time_start = time.time()
     # Fetch WKT polygon and extract latitude and longitude
     wkt_polygon = fetchWKT(agstack_geoid)
@@ -3178,48 +3181,70 @@ def getWeatherFromGHCND(agstack_geoid, dtStr):
 
     w_all = pd.DataFrame()
     for weatherDataset in weather_datasets:
-        YYYY_list = [utc_dt.year]
-        MM_list = [str(utc_dt.month).zfill(2)]
-        DD_list = [str(utc_dt.day).zfill(2)]
+        
+        for current_date in date_range:
+            YYYY_list = [current_date.year]
+            MM_list = [str(current_date.month).zfill(2)]
+            DD_list = [str(current_date.day).zfill(2)]
+            weather_df = weatherDataset.to_table(
+                filter=(
+                    ds.field('Year').isin(YYYY_list) &
+                    ds.field('Month').isin(MM_list) &
+                    ds.field('Day').isin(DD_list)
+                )
+            ).to_pandas()
 
-        weather_df = weatherDataset.to_table(
-            filter=(
-                ds.field('Year').isin(YYYY_list) &
-                ds.field('Month').isin(MM_list) &
-                ds.field('Day').isin(DD_list)
-            )
-        ).to_pandas()
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        if len(w_all)> 0:
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
 
-        if not weather_df.empty:
-            weather_df['aifstime_utc'] = pd.to_datetime(
-                weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
-            ).dt.tz_localize('UTC')
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-            # Exclude 's2_token_L9' from numerical columns
-            exclude_cols = ['s2_token_L9']
-            numeric_cols = [
-                col for col in weather_df.select_dtypes(include=[np.number]).columns if col not in exclude_cols
-            ]
-            w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
 
-            if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
-                w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
-            else:
-                w_df['aifstime_utc'] = pd.NaT
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+    #     if not weather_df.empty:
+    #         weather_df['aifstime_utc'] = pd.to_datetime(
+    #             weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+    #         ).dt.tz_localize('UTC')
 
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-    print("========w_all======",w_all)
+    #         # Exclude 's2_token_L9' from numerical columns
+    #         exclude_cols = ['s2_token_L9']
+    #         numeric_cols = [
+    #             col for col in weather_df.select_dtypes(include=[np.number]).columns if col not in exclude_cols
+    #         ]
+    #         w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
 
-    if not w_all.empty:
-        w_all = w_all.fillna(0)
-        # w_all = w_all.dropna(inplace=True)
-        w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
-        w_ret.reset_index(inplace=True)
-    else:
-        w_ret = pd.DataFrame()
+    #         if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
+    #             w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
+    #         else:
+    #             w_df['aifstime_utc'] = pd.NaT
+
+    #         w_all = pd.concat([w_all, w_df], ignore_index=True)
+    # print("========w_all======",w_all)
+
+    # if not w_all.empty:
+    #     w_all = w_all.fillna(0)
+    #     # w_all = w_all.dropna(inplace=True)
+    #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
+    #     w_ret.reset_index(inplace=True)
+    # else:
+    #     w_ret = pd.DataFrame()
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+    print(f'total time elapsed --{time_elapsed}')
 
     return w_ret
-
 """
 @memoize_ghcnd
 def getWeatherFromGHCND(dtStr, agstack_geoid):
@@ -4280,12 +4305,7 @@ def getNOAAFORECASTEDWeatherData():
 
     # Start timing for cache access
     start_time_cache_access = time.time()
-    cache_key_noaa_forecasted = ('NOAA_FORECASTED',geoid, date)
-    if cache_key_noaa_forecasted in cache_noaa_forecasted:
-        # Log cache access time
-        cache_access_duration = time.time() - start_time_cache_access
-        # logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify({"data": cache_ncep[cache_key_ncep], "metadata": meta_data_response(),"metadata-description":meta_data_with_description()})
+
 
     # Data not in cache, fetch from NOAA FORECASTED
     weather_df = getWeatherFromNOAAFORECASTED(date, geoid)
@@ -4299,8 +4319,7 @@ def getNOAAFORECASTEDWeatherData():
     # Convert DataFrame to a dictionary
     json_data = weather_df.to_dict(orient='records')
 
-    # Cache the response
-    cache_noaa_forecasted[cache_key_noaa_forecasted] = json_data
+    
 
     # Log the completion of the request
     # logging.info(f"Data for geoid: {geoid} fetched from NOAA FORECASTED and cached")
