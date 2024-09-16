@@ -2416,6 +2416,7 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
         start_time = time.time()
         # Get the list of S2 indices and CIDs for the data point
         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token--{s2_index__L5_list}')
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                         if os.path.exists(filePath + 's2_token_L5=' + x)]
     
@@ -2444,8 +2445,8 @@ def getWeatherFromNLDAS(agstack_geoid, dtStr):
                     )
                 ).to_pandas()
                 # print(weather_df)
-                # if not weather_df.empty:
-                #     weather_df.dropna(inplace=True)
+                if not weather_df.empty:
+                    weather_df.dropna(inplace=True)
                 w_all = pd.concat([w_all, weather_df], ignore_index=True)
         
         if len(w_all) > 0:
@@ -2855,10 +2856,10 @@ def getWeatherFromNOAA(agstack_geoid, start_date,end_date):
         end_DD_str = int(end_tok[2])
         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
         utc_end_dt = pytz.utc.localize(end_local_dt)
+    w_ret = pd.DataFrame()
     try:
 
 
-        w_ret = pd.DataFrame()
         s1_time_start = time.time()
         # Fetch WKT polygon and extract latitude and longitude
         wkt_polygon = fetchWKT(agstack_geoid)
@@ -3067,8 +3068,7 @@ def getWeatherFromNOAA(dtStr, agstack_geoid):
 """
 
 # NOAA_FORECASTED
-# @memoize_noaa_forecasted
-# @memoize_noaa_forecasted
+
 def getWeatherFromNOAAFORECASTED(dtStr, agstack_geoid):
     filePath = "/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/"
 
@@ -3080,63 +3080,67 @@ def getWeatherFromNOAAFORECASTED(dtStr, agstack_geoid):
     
     start_time = time.time()
 
+    try:
+        # Create a datetime object and localize it to UTC
+        local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+        utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
 
-    # Create a datetime object and localize it to UTC
-    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
-    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+        date_range = [utc_dt + timedelta(days=i) for i in range(8)]
 
-    date_range = [utc_dt + timedelta(days=i) for i in range(8)]
+        w_ret = pd.DataFrame()
+        # Fetch WKT polygon and extract lat/lon
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
 
-    w_ret = pd.DataFrame()
-    # Fetch WKT polygon and extract lat/lon
-    wkt_polygon = fetchWKT(agstack_geoid)
-    lat, lon = extractLatLonFromWKT(wkt_polygon)
+        # Filter data by level 9 tokens
+        s2_index__L5_list,cell_id = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(s2_index__L5_list)
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                if os.path.exists(filePath + 's2_token_L5=' + x)]
 
-    # Filter data by level 9 tokens
-    s2_index__L5_list,cell_id = get_s2_cellids_and_token_list(5, [lat], [lon])
-    
-    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-            if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            for current_date in date_range:
+                YYYY_list = [current_date.year]
+                MM_list = [str(current_date.month).zfill(2)]
+                DD_list = [str(current_date.day).zfill(2)]
 
-    if not list_of_5_paths:
-        return empty_response()
-    
-    weather_datasets = []
-    for x in list_of_5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        for current_date in date_range:
-            YYYY_list = [current_date.year]
-            MM_list = [str(current_date.month).zfill(2)]
-            DD_list = [str(current_date.day).zfill(2)]
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        ds.field('Year').isin(YYYY_list) &
+                        ds.field('Month').isin(MM_list) &
+                        ds.field('Day').isin(DD_list)
+                    )
+                ).to_pandas()
+                
+                w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        
+        if len(w_all) > 0:
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['TS'] = pd.to_datetime(w_all['TS'])
 
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
-                )
-            ).to_pandas()
-            
-            w_all = pd.concat([w_all, weather_df], ignore_index=True)
-    
-    if len(w_all) > 0:
-        w_all = w_all.fillna(0)
-        # Convert 'time' column to datetime format if it isn't already
-        w_all['TS'] = pd.to_datetime(w_all['TS'])
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-        # Ensure all numeric columns are converted to numeric type
-        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
 
-        # Group by 'time' and calculate the mean for each group
-        w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
-
-        # Ensure 'Year', 'Month', and 'Day' are included in the response
-        w_ret['Year'] = w_ret['Year'].astype(int)
-        w_ret['Month'] = w_ret['Month'].astype(int)
-        w_ret['Day'] = w_ret['Day'].astype(int)
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+    except Exception as e:
+        print(e)
+        
+        w_ret = empty_response()
         
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -3169,91 +3173,96 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
         utc_end_dt = pytz.utc.localize(end_local_dt)
     
     w_ret = pd.DataFrame()
-    s1_time_start = time.time()
-    # Fetch WKT polygon and extract latitude and longitude
-    wkt_polygon = fetchWKT(agstack_geoid)
-    lat, lon = extractLatLonFromWKT(wkt_polygon)
-    start_time = time.time()
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-    print(f'token---{s2_index__L5_list}')
-    
-    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                    if os.path.exists(filePath + 's2_token_L5=' + x)]
-    if not list_of_5_paths:
-        return empty_response()
-    
-    weather_datasets = []
-    for x in list_of_5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    try:
+        
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token---{s2_index__L5_list}')
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        if end_date is not None:
-            # Filter between start and end date
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()
-        elif end_date is None:
-            # Filter for start date only
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    (ds.field('Year') == int(YYYY_str)) &
-                    (ds.field('Month') == int(MM_str)) &
-                    (ds.field('Day') == int(DD_str))
-                )
-            ).to_pandas()
-    
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+        
 
-        w_all = pd.concat([w_all, weather_df], ignore_index=True)
-    if len(w_all)> 0:
-        w_all = w_all.fillna(0)
-        # Convert 'time' column to datetime format if it isn't already
-        w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        if len(w_all)> 0:
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
 
-        # Ensure all numeric columns are converted to numeric type
-        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
 
-        # Group by 'time' and calculate the mean for each group
-        w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+            
 
-        # Ensure 'Year', 'Month', and 'Day' are included in the response
-        w_ret['Year'] = w_ret['Year'].astype(int)
-        w_ret['Month'] = w_ret['Month'].astype(int)
-        w_ret['Day'] = w_ret['Day'].astype(int)
-    #     if not weather_df.empty:
-    #         weather_df['aifstime_utc'] = pd.to_datetime(
-    #             weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
-    #         ).dt.tz_localize('UTC')
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+        #     if not weather_df.empty:
+        #         weather_df['aifstime_utc'] = pd.to_datetime(
+        #             weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+        #         ).dt.tz_localize('UTC')
 
-    #         # Exclude 's2_token_L9' from numerical columns
-    #         exclude_cols = ['s2_token_L9']
-    #         numeric_cols = [
-    #             col for col in weather_df.select_dtypes(include=[np.number]).columns if col not in exclude_cols
-    #         ]
-    #         w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+        #         # Exclude 's2_token_L9' from numerical columns
+        #         exclude_cols = ['s2_token_L9']
+        #         numeric_cols = [
+        #             col for col in weather_df.select_dtypes(include=[np.number]).columns if col not in exclude_cols
+        #         ]
+        #         w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
 
-    #         if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
-    #             w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
-    #         else:
-    #             w_df['aifstime_utc'] = pd.NaT
+        #         if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
+        #             w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
+        #         else:
+        #             w_df['aifstime_utc'] = pd.NaT
 
-    #         w_all = pd.concat([w_all, w_df], ignore_index=True)
-        # print("========w_all======",w_all)
+        #         w_all = pd.concat([w_all, w_df], ignore_index=True)
+            # print("========w_all======",w_all)
 
-    # if not w_all.empty:
-    #     w_all = w_all.fillna(0)
-    #     # w_all = w_all.dropna(inplace=True)
-    #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
-    #     w_ret.reset_index(inplace=True)
-    # else:
-    #     w_ret = pd.DataFrame()
-
+        # if not w_all.empty:
+        #     w_all = w_all.fillna(0)
+        #     # w_all = w_all.dropna(inplace=True)
+        #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
+        #     w_ret.reset_index(inplace=True)
+        # else:
+        #     w_ret = pd.DataFrame()
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+        
     return w_ret
 """
 @memoize_ghcnd
@@ -3404,66 +3413,71 @@ def getWeatherFromAUSFORECASTED(agstack_geoid, dtStr):
     # Generate the next 7 days
     date_range = [utc_dt + timedelta(days=i) for i in range(8)]
 
-    # Fetch WKT polygon and extract latitude and longitude
-    wkt_polygon = fetchWKT(agstack_geoid)
-    lat, lon = extractLatLonFromWKT(wkt_polygon)
-    start_time = time.time()
-    
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-    print(f'token---{s2_index__L5_list}')
-    
-    list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                    if os.path.exists(filePath + 's2_token_L5=' + x)]
-    if not list_of_5_paths:
-        return empty_response()
-    
-    weather_datasets = []
-    for x in list_of_5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    try:
+        
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token---{s2_index__L5_list}')
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        for current_date in date_range:
-            YYYY_list = [current_date.year]
-            MM_list = [str(current_date.month).zfill(2)]
-            DD_list = [str(current_date.day).zfill(2)]
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            for current_date in date_range:
+                YYYY_list = [current_date.year]
+                MM_list = [str(current_date.month).zfill(2)]
+                DD_list = [str(current_date.day).zfill(2)]
 
-            weather_df = weatherDataset.to_table(
-                filter=(
-                    ds.field('Year').isin(YYYY_list) &
-                    ds.field('Month').isin(MM_list) &
-                    ds.field('Day').isin(DD_list)
-                )
-            ).to_pandas()
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        ds.field('Year').isin(YYYY_list) &
+                        ds.field('Month').isin(MM_list) &
+                        ds.field('Day').isin(DD_list)
+                    )
+                ).to_pandas()
 
-            # Ensure TS column is created
-            if not weather_df.empty:
-                weather_df['TS'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
+                # Ensure TS column is created
+                if not weather_df.empty:
+                    weather_df['TS'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
 
-                numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+                    numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+                    w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
 
-                # Retain the first TS value or handle TS appropriately
-                if 'TS' in weather_df.columns and not weather_df['TS'].empty:
-                    w_df['TS'] = weather_df['TS'].iloc[0]
-                else:
-                    w_df['TS'] = pd.NaT  # or some other default value
+                    # Retain the first TS value or handle TS appropriately
+                    if 'TS' in weather_df.columns and not weather_df['TS'].empty:
+                        w_df['TS'] = weather_df['TS'].iloc[0]
+                    else:
+                        w_df['TS'] = pd.NaT  # or some other default value
 
-                w_all = pd.concat([w_all, w_df], ignore_index=True)
+                    w_all = pd.concat([w_all, w_df], ignore_index=True)
 
-    print("=======w_all======", w_all)
-    if not w_all.empty:
-        w_all = w_all.fillna(0)
-        # Take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(['TS']).mean())
-        w_ret['Year'] = w_ret['Year'].astype(int)
-        w_ret['Month'] = w_ret['Month'].astype(int)
-        w_ret['Day'] = w_ret['Day'].astype(int)
-        w_ret.reset_index(inplace=True)
-    else:
-        w_ret = pd.DataFrame()
-
+        print("=======w_all======", w_all)
+        if not w_all.empty:
+            w_all = w_all.fillna(0)
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(['TS']).mean())
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+        
     end_time = time.time()
     time_elapsed = (end_time - start_time)
     print(f"Time elapsed: {time_elapsed} seconds")
@@ -3717,146 +3731,29 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
 
     return w_ret
 
-"""
-@memoize_aus
-def getWeatherFromAUS(dtStr, agstack_geoid):
-    # logging.info(f"Data Processing started for geoid: {agstack_geoid}, date: {dtStr}")
 
-    # Parse the date
+def getEtoFromWeatherData(agstack_geoid,dtStr):
+    
+    ncep_filePath = '/mn/md2/NCEP/PARQUET_S2/' 
+    noaaPath = '/mnt/md2/NOAA/DAILY/PROCESSED/PARQUET_S2/'
+    noaa_forecats_path = '/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/'
+    global_path = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
     tok = dtStr.split('-')
     YYYY_str = tok[0]
-    MM_str = tok[1].zfill(2)
+    MM_str = tok[1]
     DD_str = tok[2]
 
-    global cached_weather_files_aus, last_reload_time_aus, cached_weather_df_aus
-    start_time_total = time.time()
-
-    day_key = f'Day={DD_str}'
-
-    # Reload data if necessary
-    start_time_reload = time.time()
-    day_data = reload_data_aus(YYYY_str, MM_str, DD_str)
-    reload_duration = time.time() - start_time_reload
-    # logging.info(f"Data loading into memory took {reload_duration:.2f} seconds")
-
-    # Read and combine Parquet files using threading
-    try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            tables = list(executor.map(read_parquet_file, day_data[day_key]))
-
-        combined_table = pa.concat_tables(tables)
-        cached_weather_df_aus = combined_table.to_pandas()
-
-        # Set multi-level index for fast lookup
-        cached_weather_df_aus.set_index(['s2_token_L9', 's2_token_L7', 's2_token_L5'], inplace=True)
-    except Exception as e:
-        logging.error(f"Error reading Parquet files: {e}")
-        return empty_response()
     
-    # Fetch WKT polygon and extract lat/lon
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
-
-    # Filter data by level 9 tokens
-    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
-    s2_index__L9_list = [str(token) for token in s2_index__L9_list]
-
-    # Filter by level 9 tokens
-    try:
-        weather_df = cached_weather_df_aus.loc[
-            (s2_index__L9_list, slice(None), slice(None))
-        ]
-    except KeyError:
-        weather_df = pd.DataFrame()
-
-    # If level 9 data is empty, filter by level 7 tokens
-    if weather_df.empty:
-        level_7_tokens = get_level_7_tokens(s2_index__L9_list)
-        try:
-            weather_df = cached_weather_df_aus.loc[
-                (slice(None), level_7_tokens, slice(None))
-            ]
-        except KeyError as e:
-            print(f'{e} at level 7')
-            weather_df = pd.DataFrame()
-            
-    # If level 7 data is empty, filter by level 5 tokens
-    if weather_df.empty:
-        level_5_tokens = get_level_5_tokens(s2_index__L9_list)
-        try:
-            weather_df = cached_weather_df_aus.loc[
-                (slice(None), slice(None), level_5_tokens)
-            ]
-        except KeyError as e:
-            print(f'{e} at level 5')
-            weather_df = pd.DataFrame()
-
-    # Filter the DataFrame by date
-    weather_df = weather_df[
-        (weather_df['Year'].astype(int) == int(YYYY_str)) & 
-        (weather_df['Month'].astype(int) == int(MM_str)) & 
-        (weather_df['Day'].astype(int) == int(DD_str))
-    ]
-
-    # Check if there's data to process
-    if not weather_df.empty:
-        # Convert 'aifstime_utc' to datetime
-        weather_df['aifstime_utc'] = pd.to_datetime(weather_df['aifstime_utc'], errors='coerce')
-
-        # Extract date part (ignoring time)
-        weather_df['date'] = weather_df['aifstime_utc'].dt.date
-
-        # Aggregate numeric columns by date
-        numeric_cols = weather_df.select_dtypes(include=['number']).columns
-        weather_df_numeric = weather_df.groupby('date')[numeric_cols].mean().reset_index()
-
-        # For non-numeric columns, take the first non-null value
-        non_numeric_cols = weather_df.select_dtypes(exclude=['number']).columns.difference(['aifstime_utc', 'date'])
-        weather_df_non_numeric = weather_df.groupby('date')[non_numeric_cols].first().reset_index()
-
-        # Combine numeric and non-numeric columns
-        weather_df_combined = pd.merge(weather_df_numeric, weather_df_non_numeric, on='date')
-
-        # Filter out the result for the specific date
-        weather_df_result = weather_df_combined[
-            (weather_df_combined['date'] == pd.to_datetime(f'{YYYY_str}-{MM_str}-{DD_str}').date())
-        ]
-
-        # Drop the temporary 'date' column
-        weather_df_result = weather_df_result.drop('date', axis=1)
-
-        # Ensure the result is a single-row DataFrame
-        if len(weather_df_result) == 0:
-            weather_df_result = pd.DataFrame(empty_response())
-    else:
-        weather_df_result = pd.DataFrame(empty_response())
-
-    try:
-        weather_df_result = weather_df_result.drop(['geometry', 'region'], axis=1, errors='ignore')
-    except:
-        pass
-
-    logging.info(f"AUS Data for geoid {agstack_geoid} on {dtStr}: {weather_df_result}")
-    end_time_total = time.time()
-    total_duration = end_time_total - start_time_total
-    logging.info(f'Total function execution took {total_duration:.2f} seconds')
-
-    print(weather_df_result)
-    return weather_df_result
-"""
-
-def reload_gunicorn_workers():
-    print("Reloading Gunicorn workers...")
-    # Send the HUP signal to Gunicorn to gracefully reload the workers
-    os.kill(os.getppid(), signal.SIGHUP)  # Get Gunicorn's parent process ID and send SIGHUP
-
-def reload_data():
-    print("Reloading data...")
     
-    # Reload Gunicorn workers
-    reload_gunicorn_workers()
-
-
+    # w_all, w_ret, time_elapsed = getEtoFromNCEP(lat,lon,ncep_filePath,YYYY_str,MM_str,DD_str)
+    # w_ret = getEtoFromNOAA(lat,lon,noaaPath,YYYY_str,MM_str,DD_str)
+    # w_ret = getEtoFromNOAAForecast(lat,lon,noaa_forecats_path,YYYY_str,MM_str,DD_str)
+    w_ret = getEtoFromGHCND(lat,lon,global_path,YYYY_str,MM_str,DD_str)
+    print(f'global--{w_ret}')
+    return w_ret
+    # print(time_elapsed)
 
 
 #############
@@ -4161,13 +4058,12 @@ cache_nldas = {}
 @app.route('/')
 #def hello_world():
  #   return 'Hello World!'
-@app.route('/getNLDAS')
+@app.route('/getNCEP')
 def getNLDASData():
     geoid = request.args['geoid']
     # s2_token = ["8094c20c","8094e9e4"]
     date = request.args.get('date', '')
-    # Start timing for cache access
-    start_time_cache_access = time.time()
+
     
     # Data not in cache, fetch from NCEP
     weather_df = getWeatherFromNLDAS(geoid,date)
@@ -4194,7 +4090,7 @@ def getNLDASData():
 
 cache_ncep = {}
 
-@app.route('/getNCEP')
+@app.route('/getNLDAS')
 def getNCEPWeatherData():
     geoid = request.args['geoid']
     start_date = request.args.get('start_date', '')
@@ -4275,10 +4171,6 @@ def getNOAAWeatherData():
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date',None)
 
-    # Start timing for cache access
-    start_time_cache_access = time.time()
-   
-
     if end_date is not None :
 
         weather_df = getWeatherFromNOAA(geoid, start_date, end_date)
@@ -4288,7 +4180,7 @@ def getNOAAWeatherData():
     try:
         weather_df.reset_index(inplace=True)
     except:
-        # logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
+
         pass
 
     # Convert DataFrame to a dictionary
@@ -4300,9 +4192,6 @@ def getNOAAWeatherData():
         "metadata": get_noaa_metadata(),
         "metadata-description":get_noaa_description()
     }
-
-    # Log the completion of the request
-    # logging.info(f"Data for geoid: {geoid} fetched from NOAA and cached")
 
     return jsonify(response)
 
@@ -4355,17 +4244,10 @@ def getGHCNDWeatherData():
     try:
         weather_df.reset_index(inplace=True)
     except:
-        # logging.warning(f"Resetting index failed for dataframe with geoid: {geoid}")
         pass
 
     # Convert DataFrame to a dictionary
     json_data = weather_df.to_dict(orient='records')
-
-    # Cache the response
-    # cache_ghcnd[cache_key_ghcnd] = json_data
-
-    # Log the completion of the request
-    # logging.info(f"Data for geoid: {geoid} fetched from GHCND and cached")
 
     response = {
         "data": json_data,
@@ -4382,14 +4264,6 @@ def getAUSFORECASTEDWeatherData():
     geoid = request.args['geoid']
     date = request.args.get('date', '')
 
-    # Start timing for cache access
-    start_time_cache_access = time.time()
-    cache_key_aus_forecasted = ('AUS_FORECASTED',geoid, date)
-    if cache_key_aus_forecasted in cache_aus_forecasted:
-        # Log cache access time
-        cache_access_duration = time.time() - start_time_cache_access
-        logging.info(f"Returning cached data for geoid: {geoid} took {cache_access_duration:.2f} seconds")
-        return jsonify(cache_aus_forecasted[cache_key_aus_forecasted])
 
     # Data not in cache, fetch from AUS FORECASTED
     weather_df = getWeatherFromAUSFORECASTED(geoid, date)
@@ -4402,9 +4276,6 @@ def getAUSFORECASTEDWeatherData():
 
     # Convert DataFrame to a dictionary
     json_data = weather_df.to_dict(orient='records')
-
-    # Cache the response
-    cache_aus_forecasted[cache_key_aus_forecasted] = json_data
 
     # Log the completion of the request
     logging.info(f"Data for geoid: {geoid} fetched from AUS FORECASTED and cached")
@@ -4455,7 +4326,7 @@ def getAUSWeatherData():
     # cache_aus[cache_key_aus] = json_data
 
     # Log the completion of the request
-    logging.info(f"Data for geoid: {geoid} fetched from AUS and cached")
+    # logging.info(f"Data for geoid: {geoid} fetched from AUS and cached")
 
     response = {
         "data": json_data,
@@ -4464,6 +4335,22 @@ def getAUSWeatherData():
     }
 
     return jsonify(response)
+
+@app.route('/getEto')
+def getEtoFromWeather():
+    agstack_geoid = request.args['geoid']
+    date = request.args['date']
+
+    noaa_eto_data = getEtoFromWeatherData(agstack_geoid,date)
+    # noaa_eto_forecast_data = getEtoFromNOAAForecast(agstack_geoid,date)
+    json_data = noaa_eto_data.to_dict(orient='records')
+    
+    # print(f'noaa-forcast--{noaa_eto_forecast_data}')
+
+    response = {'ncep_eto':json_data  }
+    
+    return response
+
 
 @app.route('/ticket-response')
 def getTicketresponse():
