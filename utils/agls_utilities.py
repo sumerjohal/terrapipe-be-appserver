@@ -2,6 +2,7 @@
 # coding: utf-8
 from utils.imports import *
 from utils.settings import *
+import pytz 
 
 
 def getArea(geom):
@@ -12926,7 +12927,7 @@ def getEtoFromNCEP(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     return w_all, w_ret, time_elapsed
 
 
-def getEtoFromNOAA(lat, lon, filePath, YYYY_str, MM_str, DD_str):
+def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
     lats=[lat]
     lons=[lon]
     start_time = time.time()
@@ -12939,6 +12940,133 @@ def getEtoFromNOAA(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     #print(s2_index__L5_list)
     #print(s2_index__L8_list)
     
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    list_of_L5_paths = []
+    list_of_L7_paths = []
+    list_of_L9_paths = []
+    
+    s2_index__L7_list = ['8099c']
+    s2_index__L9_list = ['8099bc']
+
+    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
+                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    
+    
+    for p in list_of_L5_paths:
+        # print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
+        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
+                            if os.path.exists(p+'/s2_token_L7='+x)]
+    for q in list_of_L7_paths:
+        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
+        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
+                             if os.path.exists(q+'/s2_token_L9='+x)]
+    
+    weather_datasets = []
+    for x in list_of_L9_paths:
+        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+    #get the Data
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        """
+        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+        if os.path.exists(dataPath):
+            dataDir = dataPath
+        else:
+            dataDir = []
+            return []
+        
+        #get the parquet dataset from the directory
+        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        yrStr=  YYYY_str
+        moStr = MM_str
+        dtStr = DD_str
+
+        YYYY_list=[yrStr]
+        MM_list=[moStr]
+        DD_list=[dtStr]
+        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+
+        weather_df = weatherDataset.to_table(
+            columns=['Year','Month','Day','ETo_average_inches'],
+            filter=(
+                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+            )
+        ).to_pandas()
+
+        #get the DataFrame for the average of that day
+        weather_df['YYYY']=weather_df['Year'].astype(str)
+        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+        weather_df.Date = pd.to_datetime(weather_df.Date)
+
+        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+        w_df['Date']=dt
+
+        cols = ['Date','ETo_average_inches']
+        w_df = w_df[cols]
+        w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+    
+    if len(w_all)>0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
+        #take the average of the columns
+        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
+        w_ret.reset_index(inplace=True)
+    else:
+        w_ret=pd.DataFrame()
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return w_ret
+    
+
+def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
+    lats=[lat]
+    lons=[lon]
+    start_time = time.time()
+    #get the list of S2 indeces and CIDs for the data point
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+    
+    #print(s2_index__L3_list)
+    #print(s2_index__L5_list)
+    #print(s2_index__L8_list)
+    
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
 
     list_of_L5_paths = []
     list_of_L7_paths = []
@@ -12989,9 +13117,9 @@ def getEtoFromNOAA(lat, lon, filePath, YYYY_str, MM_str, DD_str):
         weather_df = weatherDataset.to_table(
             columns=['Year','Month','Day','ETo_average_inches'],
             filter=(
-                ds.field('Year').isin(YYYY_list) &
-                ds.field('Month').isin(MM_list) & 
-                ds.field('Day').isin(DD_list)
+                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
             )
         ).to_pandas()
 
@@ -13006,114 +13134,14 @@ def getEtoFromNOAA(lat, lon, filePath, YYYY_str, MM_str, DD_str):
         weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
         w_df = pd.DataFrame(weather_df.mean(axis=0)).T
         w_df['Date']=dt
-
+        # print(w_df.columns)
         cols = ['Date','ETo_average_inches']
         w_df = w_df[cols]
         w_all = pd.concat([w_all, w_df], ignore_index=True)
 
     
     if len(w_all)>0:
-        w_all['ETo_average_inches'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
-        #take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_average_inches"].sum())
-        w_ret.reset_index(inplace=True)
-    else:
-        w_ret=pd.DataFrame()
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
-    return w_ret
-    
-
-def getEtoFromNOAAForecast(lat, lon, filePath, YYYY_str, MM_str, DD_str):
-    lats=[lat]
-    lons=[lon]
-    start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
-    
-    #print(s2_index__L3_list)
-    #print(s2_index__L5_list)
-    #print(s2_index__L8_list)
-    
-
-    list_of_L5_paths = []
-    list_of_L7_paths = []
-    list_of_L9_paths = []
-    
-    s2_index__L7_list = ['8099c']
-    s2_index__L9_list = ['8099bc']
-
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
-    
-    
-    for p in list_of_L5_paths:
-        print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
-        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
-                            if os.path.exists(p+'/s2_token_L7='+x)]
-    for q in list_of_L7_paths:
-        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
-        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
-                             if os.path.exists(q+'/s2_token_L9='+x)]
-    
-    weather_datasets = []
-    for x in list_of_L9_paths:
-        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
-    #get the Data
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        """
-        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-        if os.path.exists(dataPath):
-            dataDir = dataPath
-        else:
-            dataDir = []
-            return []
-        
-        #get the parquet dataset from the directory
-        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-        """
-        yrStr=  YYYY_str
-        moStr = MM_str
-        dtStr = DD_str
-
-        YYYY_list=[yrStr]
-        MM_list=[moStr]
-        DD_list=[dtStr]
-        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-
-        weather_df = weatherDataset.to_table(
-            columns=['Year','Month','Day','ETo_AVG_IN'],
-            filter=(
-                ds.field('Year').isin(YYYY_list) &
-                ds.field('Month').isin(MM_list) & 
-                ds.field('Day').isin(DD_list)
-            )
-        ).to_pandas()
-
-        #get the DataFrame for the average of that day
-        weather_df['YYYY']=weather_df['Year'].astype(str)
-        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
-
-        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-        weather_df.Date = pd.to_datetime(weather_df.Date)
-
-        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-        w_df['Date']=dt
-        print(w_df.columns)
-        cols = ['Date','ETo_AVG_IN']
-        w_df = w_df[cols]
-        w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-    
-    if len(w_all)>0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
         #take the average of the columns
         w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
         w_ret.reset_index(inplace=True)
@@ -13126,20 +13154,38 @@ def getEtoFromNOAAForecast(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     return w_ret
 
 
-def getEtoFromGHCND(lat, lon, filePath, YYYY_str, MM_str, DD_str):
+def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
     lats=[lat]
     lons=[lon]
+    
+    #Parse the date
+    
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
     start_time = time.time()
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
     s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
     s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
+    
+    
     # print(s2_index__L5_list)
     # print(s2_index__L7_list)
     # print(s2_index__L9_list)
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
+    s2_index__L7_list = ['8099c']
+    s2_index__L9_list = ['8099bc']
 
 
     list_of_L5_paths = []
@@ -13152,7 +13198,7 @@ def getEtoFromGHCND(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     
     print(list_of_L5_paths)
     for p in list_of_L5_paths:
-        print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
+        # print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
         list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
                             if os.path.exists(p+'/s2_token_L7='+x)]
     for q in list_of_L7_paths:
@@ -13189,12 +13235,12 @@ def getEtoFromGHCND(lat, lon, filePath, YYYY_str, MM_str, DD_str):
         weather_df = weatherDataset.to_table(
             columns=['Year','Month','Day','ETo_AVG_IN'],
             filter=(
-                ds.field('Year').isin(YYYY_list) &
-                ds.field('Month').isin(MM_list) & 
-                ds.field('Day').isin(DD_list)
+                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
             )
         ).to_pandas()
-        print(weather_df)
+        # print(weather_df)
         #get the DataFrame for the average of that day
         weather_df['YYYY']=weather_df['Year'].astype(str)
         weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)

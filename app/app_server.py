@@ -3797,25 +3797,43 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
     return w_ret
 
 
-def getEtoFromWeatherData(agstack_geoid,start_date, end_date):
-    
+def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     ncep_filePath = '/mn/md2/NCEP/PARQUET_S2/' 
     noaaPath = '/mnt/md2/NOAA/DAILY/PROCESSED/PARQUET_S2/'
-    noaa_forecats_path = '/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/'
+    noaa_forecasts_path = '/mnt/md2/NOAA/DAILY/FORECASTED/PARQUET_S2/'
     global_path = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
-
-
     
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
     
-    # w_all, w_ret, time_elapsed = getEtoFromNCEP(lat,lon,ncep_filePath,YYYY_str,MM_str,DD_str)
-    # w_ret = getEtoFromNOAA(lat,lon,noaaPath,YYYY_str,MM_str,DD_str)
-    w_ret = getEtoFromNOAAForecast(lat,lon,noaa_forecats_path,start_date,end_date)
-    # w_ret = getEtoFromGHCND(lat,lon,global_path,start_date,end_date)
-    print(f'global--{w_ret}')
-    return w_ret
-    # print(time_elapsed)
+    # Fetching ETo values from different sources
+    eto_val_noaa = getEtoFromNOAA(lat, lon, noaaPath, start_date, end_date)
+    eto_val_noaa_forecast = getEtoFromNOAAForecast(lat, lon, noaa_forecasts_path, start_date, end_date)
+    eto_val_global = getEtoFromGHCND(lat, lon, global_path, start_date, end_date)
+    
+    # Extract the 'ETo_AVG_IN' values from each dataset
+    noaa_val = eto_val_noaa['ETo_AVG_IN'].values[0] if len(eto_val_noaa) > 0 else None
+    noaa_forecast_val = eto_val_noaa_forecast['ETo_AVG_IN'].values[0] if len(eto_val_noaa_forecast) > 0 else None
+    global_val = eto_val_global['ETo_AVG_IN'].values[0] if len(eto_val_global) > 0 else None
+    
+    print(f"NOAA ETo: {noaa_val}")
+    print(f"NOAA Forecast ETo: {noaa_forecast_val}")
+    print(f"Global ETo: {global_val}")
+    
+    # Combine the values into a list
+    eto_values = [noaa_val, noaa_forecast_val, global_val]
+    
+    # Filter out None, invalid data (extreme negative values), and non-numeric values
+    eto_values = [val for val in eto_values if isinstance(val, (int, float)) and val > 0]
+    print(f"Valid ETo values: {eto_values}")
+    
+    # Calculate the average if there are valid values
+    if eto_values:
+        average_eto = np.mean(eto_values)
+    else:
+        average_eto = None  # or set to 0 or some other default value if no valid ETo values are available
+    
+    return average_eto
 
 
 #############
@@ -4422,15 +4440,14 @@ def getEtoFromWeather():
     start_date = request.args['start_date']
     end_date = request.args['end_date']
 
-    noaa_eto_data = getEtoFromWeatherData(agstack_geoid,start_date,end_date)
-    # noaa_eto_forecast_data = getEtoFromNOAAForecast(agstack_geoid,date)
-    json_data = noaa_eto_data.to_dict(orient='records')
+    # Call the function to get the average ETo value
+    avg_eto_value = getEtoFromWeatherData(agstack_geoid, start_date, end_date)
     
-    # print(f'noaa-forcast--{noaa_eto_forecast_data}')
+    # Return the average ETo value in the response
+    response = {'avg_eto': avg_eto_value}
+    
+    return jsonify(response)
 
-    response = {'ncep_eto':json_data  }
-    
-    return response
 
 
 @app.route('/ticket-response')
