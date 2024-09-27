@@ -3329,15 +3329,185 @@ def getWeatherFromNOAAFORECASTED(agstack_geoid, start_date,end_date):
 
 
 # GHCND
+def getWeatherFromGHCND(agstack_geoid, start_date, end_date):
+    filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+    
+    tok = start_date.split('-')
+    YYYY_str, MM_str, DD_str = tok[0], tok[1], tok[2]
+    utc_dt = pytz.utc.localize(datetime(int(YYYY_str), int(MM_str), int(DD_str)))
+
+    if end_date:
+        end_tok = end_date.split('-')
+        end_YYYY_str, end_MM_str, end_DD_str = end_tok[0], end_tok[1], end_tok[2]
+        utc_end_dt = pytz.utc.localize(datetime(int(end_YYYY_str), int(end_MM_str), int(end_DD_str)))
+
+    w_ret = pd.DataFrame()
+    try:
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                           if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+
+        weather_datasets = [ds.dataset(x, format="parquet", partitioning="hive") for x in list_of_5_paths]
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= int(end_YYYY_str)) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= int(end_MM_str)) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= int(end_DD_str))
+                    )
+                ).to_pandas()
+            else:
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+
+        if not w_all.empty:
+            w_all = w_all.fillna(0)
+
+            # Create date range between start_date and end_date
+            if end_date:
+                date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+                
+                if len(w_all) <= len(date_range):
+                    w_all['aifstime_utc'] = date_range[:len(w_all)]
+                else:
+                    w_all['aifstime_utc'] = pd.Series(date_range).repeat(len(w_all) // len(date_range)).reset_index(drop=True)[:len(w_all)]
+            else:
+                # If only start date
+                w_all['aifstime_utc'] = pd.to_datetime(start_date)
+
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+
+            w_ret['Year'] = w_ret['aifstime_utc'].dt.year
+            w_ret['Month'] = w_ret['aifstime_utc'].dt.month
+            w_ret['Day'] = w_ret['aifstime_utc'].dt.day
+            
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+        
+    return w_ret
+
+# def getWeatherFromGHCND(agstack_geoid, start_date, end_date):
+#     # print("Local Time=======:", datetime.now())
+#     # print("UTC Time=======:", datetime.now(pytz.utc))
+
+#     filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+    
+#     tok = start_date.split('-')
+#     YYYY_str, MM_str, DD_str = tok[0], tok[1], tok[2]
+#     # print("=========dt=======",YYYY_str, MM_str, DD_str)
+#     # Create a UTC datetime object for the start date
+#     utc_dt = pytz.utc.localize(datetime(int(YYYY_str), int(MM_str), int(DD_str)))
+#     # print("=======utc_dt=======",utc_dt)
+#     if end_date:
+#         # Parse end date and create a UTC datetime object if provided
+#         end_tok = end_date.split('-')
+#         end_YYYY_str, end_MM_str, end_DD_str = end_tok[0], end_tok[1], end_tok[2]
+#         utc_end_dt = pytz.utc.localize(datetime(int(end_YYYY_str), int(end_MM_str), int(end_DD_str)))
+#         # print("========utc_end_dt========",utc_end_dt)
+
+#     w_ret = pd.DataFrame()
+#     try:
+#         # Fetch WKT polygon and extract latitude and longitude
+#         wkt_polygon = fetchWKT(agstack_geoid)
+#         lat, lon = extractLatLonFromWKT(wkt_polygon)
+#         start_time = time.time()
+
+#         # Get the list of S2 indices and CIDs for the data point
+#         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+#         print(f'token---{s2_index__L5_list}')
+
+#         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+#                            if os.path.exists(filePath + 's2_token_L5=' + x)]
+#         if not list_of_5_paths:
+#             return empty_response()
+
+#         weather_datasets = []
+#         for x in list_of_5_paths:
+#             weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+#         w_all = pd.DataFrame()
+#         for weatherDataset in weather_datasets:
+#             if end_date is not None:
+#                 # Filter between start and end date
+#                 weather_df = weatherDataset.to_table(
+#                     filter=(
+#                         (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= int(end_YYYY_str)) &
+#                         (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= int(end_MM_str)) &
+#                         (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= int(end_DD_str))
+#                     )
+#                 ).to_pandas()
+#                 print("======weather_df======")
+#                 print(weather_df)
+#             else:
+#                 # Filter for start date only
+#                 weather_df = weatherDataset.to_table(
+#                     filter=(
+#                         (ds.field('Year') == int(YYYY_str)) &
+#                         (ds.field('Month') == int(MM_str)) &
+#                         (ds.field('Day') == int(DD_str))
+#                     )
+#                 ).to_pandas()
+
+#             w_all = pd.concat([w_all, weather_df], ignore_index=True)
+
+#         if not w_all.empty:
+#             w_all = w_all.fillna(0)
+#             # Convert 'aifstime_utc' column to datetime and localize to UTC
+#             w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc']).dt.tz_localize('UTC')
+#             # w_all['aifstime_utc'] = utc_dt
+
+#             numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+#             w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+#             # Group by 'aifstime_utc' and calculate the mean for each group
+#             w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+
+#             print("=======w_ret======")
+#             print(w_ret)
+#             w_ret['Year'] = w_ret['aifstime_utc'].dt.year
+#             w_ret['Month'] = w_ret['aifstime_utc'].dt.month
+#             w_ret['Day'] = w_ret['aifstime_utc'].dt.day
+
+#             # print("=========w_ret_last==========",w_ret["aifstime_utc"], w_ret["Day"],w_ret["Month"],w_ret["Year"])
+#     except Exception as e:
+#         print(e)
+#         w_ret = empty_response()
+        
+#     return w_ret
+
+"""
 def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
+
+    print("Local Time=======:", datetime.now())
+    print("UTC Time=======:", datetime.now(pytz.utc))
+
     # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
-    # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
-    filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+    filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+    # filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
     tok = start_date.split('-')
     YYYY_str = tok[0]
     MM_str = tok[1]
     DD_str = tok[2]
-
+    print("========dt=======",YYYY_str,MM_str,DD_str)
     # Create a datetime object and localize it to UTC
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
@@ -3398,7 +3568,7 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
             w_all = w_all.fillna(0)
             # Convert 'time' column to datetime format if it isn't already
             w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
-
+            print("===========w_all======",w_all["aifstime_utc"])
             # Ensure all numeric columns are converted to numeric type
             numeric_cols = w_all.select_dtypes(include=[np.number]).columns
             w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
@@ -3406,6 +3576,9 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
             # Group by 'time' and calculate the mean for each group
             w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
             
+            print("===========w_ret======",w_ret["aifstime_utc"])
+            print("===========w_ret======",w_ret)
+
 
             # Ensure 'Year', 'Month', and 'Day' are included in the response
             w_ret['Year'] = w_ret['Year'].astype(int)
@@ -3443,6 +3616,7 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
         w_ret = empty_response()
         
     return w_ret
+"""
 """
 @memoize_ghcnd
 def getWeatherFromGHCND(dtStr, agstack_geoid):
