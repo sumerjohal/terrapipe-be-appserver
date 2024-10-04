@@ -3835,6 +3835,97 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     
     return average_eto
 
+# CIMIS
+def getWeatherFromCIMIS(agstack_geoid, start_date,end_date):
+    # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
+    filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY_TEST/'
+    # filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+    w_ret = pd.DataFrame()
+    try:
+        
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token---{s2_index__L5_list}')
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+        
+
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        print(w_all.columns.to_list())
+        print("=====w_all========")
+        print(w_all['Date'])
+        if len(w_all)> 0:
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['Date'] = pd.to_datetime(w_all['Date'])
+
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('Date').mean(numeric_only=True).reset_index()
+            
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+        
+    return w_ret
 
 #############
 
@@ -4448,6 +4539,31 @@ def getEtoFromWeather():
     
     return jsonify(response)
 
+#CIMIS
+cache_cimis = {}
+@app.route('/getCIMIS')
+def getCIMISWeatherData():
+    geoid = request.args['geoid']
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', None)
+
+    weather_df = getWeatherFromCIMIS(geoid, start_date,end_date)
+    
+    try:
+        weather_df.reset_index(inplace=True)
+    except:
+        pass
+
+    # Convert DataFrame to a dictionary
+    json_data = weather_df.to_dict(orient='records')
+
+    response = {
+        "data": json_data,
+        "metadata": get_GHCND_metdata(),
+        "metadata-description":get_GHCND_description()
+    }
+
+    return jsonify(response)
 
 
 @app.route('/ticket-response')
