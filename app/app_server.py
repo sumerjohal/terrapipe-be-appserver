@@ -2081,6 +2081,59 @@ def get_aus_description():
     }
     return metadata_aus_description
 
+def get_cimis_metadata():
+    metadata = {
+        "Date": "String",
+        "Day": "integer",
+        "HlyAirTmp": "degrees Fahrenheit",
+        "HlyAsceEto": "inches",
+        "HlyAsceEtr": "inches",
+        "HlyDewPnt": "degrees Fahrenheit",
+        "HlyEto": "inches",
+        "HlyNetRad": "watts per square meter",
+        "HlyPrecip": "inches",
+        "HlyRelHum": "percentage",
+        "HlyResWind": "miles per hour",
+        "HlySoilTmp": "degrees Fahrenheit",
+        "HlySolRad": "watts per square meter",
+        "HlyVapPres": "hectopascals",
+        "HlyWindDir": "degrees",
+        "HlyWindSpd": "miles per hour",
+        "Month": "integer",
+        "Year": "integer",
+        "elevation": "feet",
+        "lat": "degrees",
+        "lon": "degrees"
+    }
+
+    return metadata
+
+def get_cimis_description():
+    metadata_cimis_description = {
+        "Date": "Timestamp of the recorded data",
+        "Day": "Day of the month",
+        "HlyAirTmp": "Hourly air temperature",
+        "HlyAsceEto": "Hourly evapotranspiration using ASCE method",
+        "HlyAsceEtr": "Hourly reference evapotranspiration using ASCE method",
+        "HlyDewPnt": "Hourly dew point temperature",
+        "HlyEto": "Hourly evapotranspiration",
+        "HlyNetRad": "Hourly net radiation",
+        "HlyPrecip": "Hourly precipitation",
+        "HlyRelHum": "Hourly relative humidity",
+        "HlyResWind": "Hourly wind speed at reference height",
+        "HlySoilTmp": "Hourly soil temperature",
+        "HlySolRad": "Hourly solar radiation",
+        "HlyVapPres": "Hourly vapor pressure",
+        "HlyWindDir": "Hourly wind direction",
+        "HlyWindSpd": "Hourly wind speed",
+        "Month": "Month of the year",
+        "Year": "Year of observation",
+        "elevation": "Elevation of the location",
+        "lat": "Latitude of the location",
+        "lon": "Longitude of the location"
+    }
+    return metadata_cimis_description
+
 def clear_cache(cache):
     """Clear the specified cache."""
     cache.clear()
@@ -3836,61 +3889,55 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     return average_eto
 
 # CIMIS
-def getWeatherFromCIMIS(agstack_geoid, start_date,end_date):
-    # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
-    filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY_TEST/'
-    # filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
+    # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY/PARQUET_S2/'
+    filePath = '/mnt/md2/CIMIS/HOURLY/PARQUET_S2/'
+
+    
+    # Parse start date
     tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-
-    # Create a datetime object and localize it to UTC
+    YYYY_str, MM_str, DD_str = tok[0], tok[1], tok[2]
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
-    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+    utc_dt = pytz.utc.localize(local_dt)
 
+    # Parse end date if provided
     if end_date:
-        # Parse end date and localize it to UTC if provided
         end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
+        end_YYYY_str, end_MM_str, end_DD_str = int(end_tok[0]), int(end_tok[1]), int(end_tok[2])
         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
         utc_end_dt = pytz.utc.localize(end_local_dt)
-    
+
     w_ret = pd.DataFrame()
+    
     try:
-        
-        # Fetch WKT polygon and extract latitude and longitude
         wkt_polygon = fetchWKT(agstack_geoid)
         lat, lon = extractLatLonFromWKT(wkt_polygon)
         start_time = time.time()
-        # Get the list of S2 indices and CIDs for the data point
+
         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
         print(f'token---{s2_index__L5_list}')
-        
+
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+                           if os.path.exists(filePath + 's2_token_L5=' + x)]
         if not list_of_5_paths:
             return empty_response()
-        
-        weather_datasets = []
-        for x in list_of_5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        weather_datasets = [ds.dataset(x, format="parquet", partitioning="hive") for x in list_of_5_paths]
 
         w_all = pd.DataFrame()
         for weatherDataset in weather_datasets:
             if end_date is not None:
-                # Filter between start and end date
                 weather_df = weatherDataset.to_table(
                     filter=(
-                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                        (ds.field('Year') >= int(YYYY_str)) & 
+                        (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & 
+                        (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & 
+                        (ds.field('Day') <= end_DD_str)
                     )
                 ).to_pandas()
-            elif end_date is None:
-                # Filter for start date only
+            else:
                 weather_df = weatherDataset.to_table(
                     filter=(
                         (ds.field('Year') == int(YYYY_str)) &
@@ -3898,34 +3945,125 @@ def getWeatherFromCIMIS(agstack_geoid, start_date,end_date):
                         (ds.field('Day') == int(DD_str))
                     )
                 ).to_pandas()
-        
-
             w_all = pd.concat([w_all, weather_df], ignore_index=True)
-        print(w_all.columns.to_list())
-        print("=====w_all========")
-        print(w_all['Date'])
-        if len(w_all)> 0:
+
+        if len(w_all) > 0:
             w_all = w_all.fillna(0)
-            # Convert 'time' column to datetime format if it isn't already
             w_all['Date'] = pd.to_datetime(w_all['Date'])
 
-            # Ensure all numeric columns are converted to numeric type
-            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
-
-            # Group by 'time' and calculate the mean for each group
-            w_ret = w_all.groupby('Date').mean(numeric_only=True).reset_index()
+            numeric_cols = ['HlyAirTmp', 'HlyDewPnt', 'HlyEto', 'HlyNetRad', 'HlyAsceEto',
+                            'HlyAsceEtr', 'HlyPrecip', 'HlyRelHum', 'HlyResWind',
+                            'HlySoilTmp', 'HlySolRad', 'HlyVapPres', 'HlyWindDir',
+                            'HlyWindSpd']
             
-            # Ensure 'Year', 'Month', and 'Day' are included in the response
-            w_ret['Year'] = w_ret['Year'].astype(int)
-            w_ret['Month'] = w_ret['Month'].astype(int)
-            w_ret['Day'] = w_ret['Day'].astype(int)
+            for col in numeric_cols:
+                if col in w_all.columns:
+                    w_all[col] = pd.to_numeric(w_all[col], errors='coerce').fillna(0)
+
+            w_ret = w_all.groupby('Date', as_index=False).mean(numeric_only=True)
+            w_ret['Year'] = w_ret['Date'].dt.year
+            w_ret['Month'] = w_ret['Date'].dt.month
+            w_ret['Day'] = w_ret['Date'].dt.day
 
     except Exception as e:
         print(e)
         w_ret = empty_response()
-        
+
     return w_ret
+
+
+
+# def getWeatherFromCIMIS(agstack_geoid, start_date,end_date):
+#     # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
+#     filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY_TEST_2/'
+#     # filePath = '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/'
+#     tok = start_date.split('-')
+#     YYYY_str = tok[0]
+#     MM_str = tok[1]
+#     DD_str = tok[2]
+
+#     # Create a datetime object and localize it to UTC
+#     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+#     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+#     if end_date:
+#         # Parse end date and localize it to UTC if provided
+#         end_tok = end_date.split('-')
+#         end_YYYY_str = int(end_tok[0])
+#         end_MM_str = int(end_tok[1])
+#         end_DD_str = int(end_tok[2])
+#         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+#         utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+#     w_ret = pd.DataFrame()
+#     try:
+        
+#         # Fetch WKT polygon and extract latitude and longitude
+#         wkt_polygon = fetchWKT(agstack_geoid)
+#         lat, lon = extractLatLonFromWKT(wkt_polygon)
+#         start_time = time.time()
+#         # Get the list of S2 indices and CIDs for the data point
+#         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+#         print(f'token---{s2_index__L5_list}')
+        
+#         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+#                         if os.path.exists(filePath + 's2_token_L5=' + x)]
+#         if not list_of_5_paths:
+#             return empty_response()
+        
+#         weather_datasets = []
+#         for x in list_of_5_paths:
+#             weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+#         w_all = pd.DataFrame()
+#         for weatherDataset in weather_datasets:
+#             if end_date is not None:
+#                 # Filter between start and end date
+#                 weather_df = weatherDataset.to_table(
+#                     filter=(
+#                         (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+#                         (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+#                         (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+#                     )
+#                 ).to_pandas()
+#             elif end_date is None:
+#                 # Filter for start date only
+#                 weather_df = weatherDataset.to_table(
+#                     filter=(
+#                         (ds.field('Year') == int(YYYY_str)) &
+#                         (ds.field('Month') == int(MM_str)) &
+#                         (ds.field('Day') == int(DD_str))
+#                     )
+#                 ).to_pandas()
+        
+
+#             w_all = pd.concat([w_all, weather_df], ignore_index=True)
+#         print(w_all.columns.to_list())
+#         print("=====w_all========")
+#         print(w_all['Date'])
+#         if len(w_all)> 0:
+#             w_all = w_all.fillna(0)
+#             # Convert 'time' column to datetime format if it isn't already
+#             w_all['Date'] = pd.to_datetime(w_all['Date'])
+#             print("=======w_all=====", w_all.head(10))
+#             # Ensure all numeric columns are converted to numeric type
+#             numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+#             w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+#             # Group by 'time' and calculate the mean for each group
+#             w_ret = w_all.groupby('Date').mean(numeric_only=True).reset_index()
+#             print("=======w_ret=====", w_ret.head(10))
+        
+#             # Ensure 'Year', 'Month', and 'Day' are included in the response
+#             w_ret['Year'] = w_ret['Year'].astype(int)
+#             w_ret['Month'] = w_ret['Month'].astype(int)
+#             w_ret['Day'] = w_ret['Day'].astype(int)
+
+#     except Exception as e:
+#         print(e)
+#         w_ret = empty_response()
+        
+#     return w_ret
 
 #############
 
@@ -4559,8 +4697,8 @@ def getCIMISWeatherData():
 
     response = {
         "data": json_data,
-        "metadata": get_GHCND_metdata(),
-        "metadata-description":get_GHCND_description()
+        "metadata": get_cimis_metadata(),
+        "metadata-description":get_cimis_description()
     }
 
     return jsonify(response)
