@@ -2083,7 +2083,7 @@ def get_aus_description():
 
 def get_cimis_metadata():
     metadata = {
-        "Date": "String",
+        "Date": "datetime (UTC)",
         "Day": "integer",
         "HlyAirTmp": "degrees Fahrenheit",
         "HlyAsceEto": "inches",
@@ -3890,8 +3890,8 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
 
 # CIMIS
 def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
-    # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY/PARQUET_S2/'
-    filePath = '/mnt/md2/CIMIS/HOURLY/PARQUET_S2/'
+    filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/CIMIS/HOURLY/PARQUET_S2/'
+    # filePath = '/mnt/md2/CIMIS/HOURLY/PARQUET_S2/'
 
     
     # Parse start date
@@ -3949,7 +3949,8 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
 
         if len(w_all) > 0:
             w_all = w_all.fillna(0)
-            w_all['Date'] = pd.to_datetime(w_all['Date'])
+            # w_all['Date'] = pd.to_datetime(w_all['Date'])
+            w_all['Date'] = pd.to_datetime(w_all['Date'], utc=True)
 
             numeric_cols = ['HlyAirTmp', 'HlyDewPnt', 'HlyEto', 'HlyNetRad', 'HlyAsceEto',
                             'HlyAsceEtr', 'HlyPrecip', 'HlyRelHum', 'HlyResWind',
@@ -3964,7 +3965,7 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
             w_ret['Year'] = w_ret['Date'].dt.year
             w_ret['Month'] = w_ret['Date'].dt.month
             w_ret['Day'] = w_ret['Date'].dt.day
-
+            w_ret['Date'] = w_ret['Date'].dt.strftime("%a, %d %b %Y %H:%M:%S UTC")
     except Exception as e:
         print(e)
         w_ret = empty_response()
