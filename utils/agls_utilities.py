@@ -5789,7 +5789,6 @@ def generate_AUS_ETo2(acct_gdf, stns_gdf, startDtStr, endDtStr):
         #if (stn):
         #print(df)
         #print(df.columns)
-        #print(weather_df)
         #print(len(weather_df))
         #(str(stn).replace(' ','').strip()):
         weather_df['StnID']=stn
@@ -12830,20 +12829,33 @@ def getEToForArchiveObs(region_gdf):
 
 import time
 
-def getEtoFromNCEP(lat, lon, filePath, YYYY_str, MM_str, DD_str):
+def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
     lats=[lat]
     lons=[lon]
     start_time = time.time()
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+    
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+    # s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    # s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
-    #print(s2_index__L3_list)
-    #print(s2_index__L5_list)
-    #print(s2_index__L8_list)
-    
-    print(s2_index__L7_list)
+    # print(s2_index__L5_list)
+    # print(s2_index__L7_list)
+    # print(s2_index__L9_list)
 
     list_of_L5_paths = []
     list_of_L7_paths = []
@@ -12852,19 +12864,10 @@ def getEtoFromNCEP(lat, lon, filePath, YYYY_str, MM_str, DD_str):
     list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
                         if os.path.exists(filePath+'s2_token_L5='+x)]
     
-    
-    for p in list_of_L5_paths:
-        
-        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
-                            if os.path.exists(p+'/s2_token_L7='+x)]
-    for q in list_of_L7_paths:
-        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
-        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
-                             if os.path.exists(q+'/s2_token_L9='+x)]
-    
     weather_datasets = []
-    for x in list_of_L9_paths:
-        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+        
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     
     #get the Data
     w_all = pd.DataFrame()
@@ -12880,64 +12883,258 @@ def getEtoFromNCEP(lat, lon, filePath, YYYY_str, MM_str, DD_str):
         #get the parquet dataset from the directory
         weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
         """
-        yrStr=  YYYY_str
-        moStr = MM_str
-        dtStr = DD_str
+        
+        dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
+        try:
+            
+            weather_df = weatherDataset.to_table(
+                columns=['Year','Month','Day','ETo_AVG_IN'],
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()
 
-        YYYY_list=[yrStr]
-        MM_list=[moStr]
-        DD_list=[dtStr]
-        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
 
-        weather_df = weatherDataset.to_table(
-            columns=['Year','Month','Day','ETo_AVG_IN'],
-            filter=(
-                ds.field('Year').isin(YYYY_list) &
-                ds.field('Month').isin(MM_list) & 
-                ds.field('Day').isin(DD_list)
-            )
-        ).to_pandas()
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
 
-        #get the DataFrame for the average of that day
-        weather_df['YYYY']=weather_df['Year'].astype(str)
-        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
 
-        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-        weather_df.Date = pd.to_datetime(weather_df.Date)
-
-        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-        w_df['Date']=dt
-
-        cols = ['Date','ETo_AVG_IN']
-        w_df = w_df[cols]
-        w_all = pd.concat([w_all, w_df], ignore_index=True)
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+            
+        except Exception as e:
+            print(e)
     
-    if len(w_all)>0:
-        #take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
-        w_ret.reset_index(inplace=True)
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
     else:
-        w_ret=pd.DataFrame()
+        w_ret = pd.DataFrame()
+
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
     
-    return w_all, w_ret, time_elapsed
+    return  w_ret
 
+def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
+    lats=[lat]
+    lons=[lon]
+    start_time = time.time()
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+    
+    #get the list of S2 indeces and CIDs for the data point
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    list_of_L5_paths = []
 
-def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
+    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
+                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    
+    weather_datasets = []
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    
+    #get the Data
+    w_all = pd.DataFrame()
+    try:
+        
+        for weatherDataset in weather_datasets:
+            """
+            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+            if os.path.exists(dataPath):
+                dataDir = dataPath
+            else:
+                dataDir = []
+                return []
+            
+            #get the parquet dataset from the directory
+            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+            """
+            
+            dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
+
+            weather_df = weatherDataset.to_table(
+                columns=['Year','Month','Day','ETo_AVG_IN'],
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()      
+            
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
+
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+    except Exception as e:
+        print(e)
+            
+        
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
+    else:
+        w_ret = pd.DataFrame()
+
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return  w_ret
+
+def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
+    lats = [lat]
+    lons = [lon]
+    start_time = time.time()
+
+    # Get the list of S2 indices and CIDs for the data point
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+        
+    list_of_L5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list if os.path.exists(filePath + 's2_token_L5=' + x)]
+
+    weather_datasets = []
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+    # Get the data
+    w_all = pd.DataFrame()
+    try:
+        for weatherDataset in weather_datasets:
+            # List the columns available in the dataset to identify the correct field name
+            # print(f"Columns in dataset: {weatherDataset.schema}")
+            
+            yrStr = YYYY_str
+            moStr = MM_str
+            dtStr = DD_str
+
+            dt = datetime.strptime(yrStr + '-' + moStr + '-' + dtStr, '%Y-%m-%d')
+
+            # Adjust the field name to match the actual column names in the dataset
+            weather_df = weatherDataset.to_table(
+                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN'],  # Correct column name here
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()
+
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+                    # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            numeric_cols = weather_df.select_dtypes(include=['number']).columns
+            
+            if not numeric_cols.empty:
+                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+            else:
+                print("No numeric columns found for mean calculation.")
+                continue
+            
+            w_df['Date']=dt
+
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+    except Exception as e:
+        w_ret=pd.DataFrame()    
+    
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
+    else:
+        w_ret = pd.DataFrame()
+
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return w_ret
+
+def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     lats=[lat]
     lons=[lon]
     start_time = time.time()
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
     #print(s2_index__L3_list)
-    #print(s2_index__L5_list)
+    # print(f'AUS Forecast--{s2_index__L5_list}')
     #print(s2_index__L8_list)
     
     tok = start_date.split('-')
@@ -12955,84 +13152,194 @@ def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
         utc_end_dt = pytz.utc.localize(end_local_dt)
 
     list_of_L5_paths = []
-    list_of_L7_paths = []
-    list_of_L9_paths = []
     
-    s2_index__L7_list = ['8099c']
-    s2_index__L9_list = ['8099bc']
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
 
     list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
                         if os.path.exists(filePath+'s2_token_L5='+x)]
     
     
-    for p in list_of_L5_paths:
-        # print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
-        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
-                            if os.path.exists(p+'/s2_token_L7='+x)]
-    for q in list_of_L7_paths:
-        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
-        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
-                             if os.path.exists(q+'/s2_token_L9='+x)]
+    weather_datasets = []
+        
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    #get the Data
+    try:
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            """
+            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+            if os.path.exists(dataPath):
+                dataDir = dataPath
+            else:
+                dataDir = []
+                return []
+            
+            #get the parquet dataset from the directory
+            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+            """
+            yrStr=  YYYY_str
+            moStr = MM_str
+            dtStr = DD_str
+            
+            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+                
+            weather_df = weatherDataset.to_table(
+                columns=['Year','Month','Day','ETo_average_inches'],
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()
+
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
+
+            cols = ['Date','ETo_average_inches']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+    except Exception as e:
+        w_ret=pd.DataFrame()
+
+        
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
+    else:
+        w_ret = pd.DataFrame()
+
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return w_ret
+
+def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
+    lats=[lat]
+    lons=[lon]
+    start_time = time.time()
+    #get the list of S2 indeces and CIDs for the data point
+    s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
+    
+    #print(s2_index__L3_list)
+    # print(f'NOAA DAily-{s2_index__L3_list}')
+    #print(s2_index__L8_list)
+    
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    list_of_L3_paths = []
+    
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
+
+    list_of_L3_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
+                        if os.path.exists(filePath+'s2_index__L3='+x)]
+    
     
     weather_datasets = []
-    for x in list_of_L9_paths:
-        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+        
+    for x in list_of_L3_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     #get the Data
     w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        """
-        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-        if os.path.exists(dataPath):
-            dataDir = dataPath
-        else:
-            dataDir = []
-            return []
+    try:
         
-        #get the parquet dataset from the directory
-        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-        """
-        yrStr=  YYYY_str
-        moStr = MM_str
-        dtStr = DD_str
+        for weatherDataset in weather_datasets:
+            """
+            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+            if os.path.exists(dataPath):
+                dataDir = dataPath
+            else:
+                dataDir = []
+                return []
+            
+            #get the parquet dataset from the directory
+            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+            """
+            yrStr=  YYYY_str
+            moStr = MM_str
+            dtStr = DD_str
+            
+            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
 
-        YYYY_list=[yrStr]
-        MM_list=[moStr]
-        DD_list=[dtStr]
-        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+                
+            weather_df = weatherDataset.to_table(
+                columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN'],  # Use the correct column name
+                filter=(
+                    (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= int(end_YYYY_str)) &
+                    (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= int(end_MM_str)) &
+                    (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= int(end_DD_str))
+                )
+            ).to_pandas()
 
-        weather_df = weatherDataset.to_table(
-            columns=['Year','Month','Day','ETo_average_inches'],
-            filter=(
-                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-            )
-        ).to_pandas()
 
-        #get the DataFrame for the average of that day
-        weather_df['YYYY']=weather_df['Year'].astype(str)
-        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+            # #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['YYYY'].astype(str)
+            weather_df['MM']=weather_df['MM'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['DD'].astype(str).str.zfill(2)
 
-        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-        weather_df.Date = pd.to_datetime(weather_df.Date)
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
 
-        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-        w_df['Date']=dt
+            # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            numeric_cols = weather_df.select_dtypes(include=['number']).columns
+            
+            if not numeric_cols.empty:
+                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+            else:
+                print("No numeric columns found for mean calculation.")
+                continue
+            w_df['Date']=dt
 
-        cols = ['Date','ETo_average_inches']
-        w_df = w_df[cols]
-        w_all = pd.concat([w_all, w_df], ignore_index=True)
-
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+    except Exception as e:
+        w_ret = pd.DataFrame()
     
-    if len(w_all)>0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
-        #take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
-        w_ret.reset_index(inplace=True)
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
     else:
-        w_ret=pd.DataFrame()
+        w_ret = pd.DataFrame()
+
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -13046,11 +13353,9 @@ def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
     start_time = time.time()
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
-    
+
     #print(s2_index__L3_list)
-    #print(s2_index__L5_list)
+    # print(f'NOAA Forecast-{s2_index__L5_list}')
     #print(s2_index__L8_list)
     
     tok = start_date.split('-')
@@ -13068,89 +13373,86 @@ def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
         utc_end_dt = pytz.utc.localize(end_local_dt)
 
 
-    list_of_L5_paths = []
-    list_of_L7_paths = []
-    list_of_L9_paths = []
-    
-    s2_index__L7_list = ['8099c']
-    s2_index__L9_list = ['8099bc']
+    list_of_L5_paths = []    
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
 
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
-    
-    
-    for p in list_of_L5_paths:
-        print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
-        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
-                            if os.path.exists(p+'/s2_token_L7='+x)]
-    for q in list_of_L7_paths:
-        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
-        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
-                             if os.path.exists(q+'/s2_token_L9='+x)]
+    list_of_L5_paths = [filePath+'s2_tokens_l5='+x for x in s2_index__L5_list 
+                        if os.path.exists(filePath+'s2_tokens_l5='+x)]
     
     weather_datasets = []
-    for x in list_of_L9_paths:
-        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     #get the Data
     w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        """
-        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-        if os.path.exists(dataPath):
-            dataDir = dataPath
-        else:
-            dataDir = []
-            return []
+    try:
+        for weatherDataset in weather_datasets:
+            """
+            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+            if os.path.exists(dataPath):
+                dataDir = dataPath
+            else:
+                dataDir = []
+                return []
+            
+            #get the parquet dataset from the directory
+            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+            """
+            yrStr=  YYYY_str
+            moStr = MM_str
+            dtStr = DD_str
+            
+            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+
+                
+            weather_df = weatherDataset.to_table(
+                columns=['Year', 'Month', 'Day', 'ETo_average_inches'],  # Use the correct column name
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= int(end_YYYY_str)) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= int(end_MM_str)) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= int(end_DD_str))
+                )
+            ).to_pandas()
+
+
+
+            # #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
+            # print(w_df.columns)
+            cols = ['Date','ETo_average_inches']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+    except Exception as e:
+        w_ret = pd.DataFrame()     
         
-        #get the parquet dataset from the directory
-        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-        """
-        yrStr=  YYYY_str
-        moStr = MM_str
-        dtStr = DD_str
-
-        YYYY_list=[yrStr]
-        MM_list=[moStr]
-        DD_list=[dtStr]
-        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-
-        weather_df = weatherDataset.to_table(
-            columns=['Year','Month','Day','ETo_average_inches'],
-            filter=(
-                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-            )
-        ).to_pandas()
-
-        #get the DataFrame for the average of that day
-        weather_df['YYYY']=weather_df['Year'].astype(str)
-        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
-
-        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-        weather_df.Date = pd.to_datetime(weather_df.Date)
-
-        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-        w_df['Date']=dt
-        # print(w_df.columns)
-        cols = ['Date','ETo_average_inches']
-        w_df = w_df[cols]
-        w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-    
-    if len(w_all)>0:
+        
+    if len(w_all) > 0:
         w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
-        #take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
-        w_ret.reset_index(inplace=True)
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
     else:
-        w_ret=pd.DataFrame()
+        w_ret = pd.DataFrame()
+
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
-    
+
     return w_ret
 
 
@@ -13176,39 +13478,23 @@ def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
     start_time = time.time()
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
-    
-    
+
     # print(s2_index__L5_list)
     # print(s2_index__L7_list)
     # print(s2_index__L9_list)
-    s2_index__L7_list = ['8099c']
-    s2_index__L9_list = ['8099bc']
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
 
 
     list_of_L5_paths = []
-    list_of_L7_paths = []
-    list_of_L9_paths = []
-
-
     list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
                         if os.path.exists(filePath+'s2_token_L5='+x)]
-    
-    print(list_of_L5_paths)
-    for p in list_of_L5_paths:
-        # print(p+'/s2_token_L7='+x for x in s2_index__L7_list)
-        list_of_L7_paths+= [p+'/s2_token_L7='+x for x in s2_index__L7_list 
-                            if os.path.exists(p+'/s2_token_L7='+x)]
-    for q in list_of_L7_paths:
-        print(p+'/s2_token_L9='+x for x in s2_index__L9_list )
-        list_of_L9_paths += [q+'/s2_token_L9='+x for x in s2_index__L9_list 
-                             if os.path.exists(q+'/s2_token_L9='+x)]
+
     
     weather_datasets = []
-    for x in list_of_L9_paths:
-        weather_datasets.append( ds.dataset(x,format="parquet", partitioning="hive") )
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     #get the Data
     w_all = pd.DataFrame()
     for weatherDataset in weather_datasets:
@@ -13226,22 +13512,123 @@ def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
         yrStr=  YYYY_str
         moStr = MM_str
         dtStr = DD_str
-
-        YYYY_list=[yrStr]
-        MM_list=[moStr]
-        DD_list=[dtStr]
+        
         dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+        try:
+            
+            weather_df = weatherDataset.to_table(
+                columns=['Year','Month','Day','ETo_AVG_IN'],
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()
 
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
+
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+        except Exception as e:
+            print(e)
+    
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
+    else:
+        w_ret = pd.DataFrame()
+
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return w_ret
+
+def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
+          
+    #Parse the date
+    
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+    
+    ## Get S2 indices and CIDs
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+    
+    # Generate paths for available datasets
+    list_of_L5_paths = [
+        os.path.join(filePath, f"s2_token_L5={x}")
+        for x in s2_index__L5_list
+        if os.path.exists(os.path.join(filePath, f"s2_token_L5={x}"))
+    ]
+    
+    # Load weather datasets
+    weather_datasets = [
+        ds.dataset(path, format="parquet", partitioning="hive")
+        for path in list_of_L5_paths
+    ]
+    
+    
+    w_all = pd.DataFrame()
+    w_ret=pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        
+        """
+            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+            if os.path.exists(dataPath):
+                dataDir = dataPath
+            else:
+                dataDir = []
+                return []
+            
+            #get the parquet dataset from the directory
+            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        yrStr=  YYYY_str
+        moStr = MM_str
+        dtStr = DD_str
+        
+        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+        
         weather_df = weatherDataset.to_table(
-            columns=['Year','Month','Day','ETo_AVG_IN'],
+            columns=["Year", "Month", "Day", "HlyEto"],
             filter=(
                 (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
                 (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
                 (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
             )
         ).to_pandas()
-        # print(weather_df)
-        #get the DataFrame for the average of that day
+        
+                #get the DataFrame for the average of that day
         weather_df['YYYY']=weather_df['Year'].astype(str)
         weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
         weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
@@ -13250,250 +13637,340 @@ def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
         weather_df.Date = pd.to_datetime(weather_df.Date)
 
         weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+        # Convert HlyEto to numeric (handle coercion)
+        weather_df['HlyEto'] = pd.to_numeric(weather_df['HlyEto'], errors='coerce')
+
+        # Calculate mean for numeric columns
+        numeric_cols = weather_df.select_dtypes(include=['number']).columns
+        if not numeric_cols.empty:
+            w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+        else:
+            print("No numeric columns found for mean calculation.")
+            continue
+
         w_df['Date']=dt
-
-        cols = ['Date','ETo_AVG_IN']
+        
+        cols = ['Date','HlyEto']
         w_df = w_df[cols]
-        w_all = pd.concat([w_all, w_df], ignore_index=True)
+        w_all = pd.concat([w_all, w_df], ignore_index=True)         
+            
+    if len(w_all) > 0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['HlyEto'], errors='coerce')
+        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
 
-    
-    if len(w_all)>0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        #take the average of the columns
-        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
-        w_ret.reset_index(inplace=True)
+        if not w_all.empty:
+            # Take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+            w_ret.reset_index(inplace=True)
+        else:
+            w_ret = pd.DataFrame()
     else:
-        w_ret=pd.DataFrame()
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
+        w_ret = pd.DataFrame()
+
+
     return w_ret
 
+
+# from bisect import bisect_left , bisect_right
+
+# def filter_by_date_range(df,start_date,end_date):
+    
+#     # ensure date column is sorted
+    
+#     df = df.sort_values(by='Date')
+#     date_list = df['Date'].tolist()
+    
+#     # Use binary search for fast filtering
+#     start_idx = bisect_left(date_list , start_date)
+#     end_idx = bisect_right(date_list , end_date)
+    
+#     return df.iloc[start_idx:end_idx]
+
+
+
+# def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
+    
+#     # parse the start date and end date
+#     start_dt = datetime.strptime(start_date,'%Y-%m-%d')
+#     utc_end_dt = None
+#     if end_date:
+#         end_dt = datetime.strptime(end_date,'%Y-%m-%d')
+#         utc_end_dt = pytz.utc.localize(end_dt)
+    
+#     # Get S2 indices and CIDs
+#     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+    
+#     # Generate paths for available datasets
+#     list_of_L5_paths = [
+#         os.path.join(filePath, f"s2_token_L5={x}")
+#         for x in s2_index__L5_list
+#         if os.path.exists(os.path.join(filePath, f"s2_token_L5={x}"))
+#     ]
+    
+#     # Load weather datasets
+#     weather_datasets = [
+#         ds.dataset(path, format="parquet", partitioning="hive")
+#         for path in list_of_L5_paths
+#     ]
+    
+#     # Prepare filters for dataset
+#     filters = (
+#         (ds.field("Year") >= start_dt.year) & (ds.field("Year") <= end_dt.year) &
+#         (ds.field("Month") >= start_dt.month) & (ds.field("Month") <= end_dt.month) &
+#         (ds.field("Day") >= start_dt.day) & (ds.field("Day") <= end_dt.day)
+#     )
+    
+#     weather_frames = []
+#     for weather_dataset in weather_datasets:
+#         weather_df = weather_dataset.to_table(
+#             columns=["Year", "Month", "Day", "HlyEto"], filter=filters
+#         ).to_pandas()
+
+#         if not weather_df.empty:
+#             weather_df["Date"] = pd.to_datetime(
+#                 weather_df[["Year", "Month", "Day"]]
+#                     .astype(str)
+#                     .agg("-".join, axis=1)
+#             )
+#             weather_df = weather_df.drop(columns=["Year", "Month", "Day"])
+#             weather_df = filter_by_date_range(weather_df, start_dt, end_dt)  # Binary search filtering
+#             print(weather_df.columns)
+#             weather_frames.append(weather_df)
+
+#      # Concatenate and aggregate data
+#     if weather_frames:
+#         w_all = pd.concat(weather_frames, ignore_index=True)
+#         print(w_all["HlyEto"])
+#         w_all["ETo_AVG_IN"] = w_all["HlyEto"]
+#         w_ret = w_all.groupby("Date", as_index=False)["ETo_AVG_IN"].sum()
+#     else:
+#         w_ret = pd.DataFrame(columns=["Date", "ETo_AVG_IN"])
+    
+#     return w_ret
 
 
 ################################################################
 ################################################################	
 #********** DATA
 #get the USA Mainland Polygon
-print('\nBuilding Boundary Polygons...')
-print('\n\tBuilding Contiguous USA Mainland Boundary Polygon...')
-uspolys = pd.DataFrame(columns=['Area','geometry'])
-us_boundary = data_dir + 'cb_2018_us_nation_5m.shp'
-us_gdf = gpd.read_file(us_boundary, driver='SHAPEFILE')
-us_polygon_list = list(us_gdf.geometry[0])
-i=1
-for geom in us_polygon_list:
-    a = getArea(geom)
-    uspolys.loc[i,'Area']=a
-    uspolys.loc[i,'geometry']=geom
-    i=i+1
-uspolys.sort_values(by='Area',inplace=True)
-uspolys.reset_index(drop=True,inplace=True)
-usap = uspolys.loc[len(uspolys)-1,'geometry']    
+# print('\nBuilding Boundary Polygons...')
+# print('\n\tBuilding Contiguous USA Mainland Boundary Polygon...')
+# uspolys = pd.DataFrame(columns=['Area','geometry'])
+# us_boundary = data_dir + 'cb_2018_us_nation_5m.shp'
+# us_gdf = gpd.read_file(us_boundary, driver='SHAPEFILE')
+# us_polygon_list = list(us_gdf.geometry[0])
+# i=1
+# for geom in us_polygon_list:
+#     a = getArea(geom)
+#     uspolys.loc[i,'Area']=a
+#     uspolys.loc[i,'geometry']=geom
+#     i=i+1
+# uspolys.sort_values(by='Area',inplace=True)
+# uspolys.reset_index(drop=True,inplace=True)
+# usap = uspolys.loc[len(uspolys)-1,'geometry']    
 
-print('\n\tBuilding USA States Boundary Polygons...')
-usstates_boundary = data_dir + 'tl_2019_us_state.shp'
-usstates_gdf = gpd.read_file(usstates_boundary, driver='SHAPEFILE')
-usstates_gdf = usstates_gdf.to_crs(4326)
+# print('\n\tBuilding USA States Boundary Polygons...')
+# usstates_boundary = data_dir + 'tl_2019_us_state.shp'
+# usstates_gdf = gpd.read_file(usstates_boundary, driver='SHAPEFILE')
+# usstates_gdf = usstates_gdf.to_crs(4326)
 
-print('\n\tBuilding CA Boundary Polygon...')
-ca_gdf = usstates_gdf[usstates_gdf.NAME=='California']
-ca_gdf.reset_index(drop=True, inplace=True)
-cap = ca_gdf.geometry[0]
+# print('\n\tBuilding CA Boundary Polygon...')
+# ca_gdf = usstates_gdf[usstates_gdf.NAME=='California']
+# ca_gdf.reset_index(drop=True, inplace=True)
+# cap = ca_gdf.geometry[0]
 
-print('\n\tBuilding AZ Boundary Polygon...')
-az_gdf = usstates_gdf[usstates_gdf.NAME=='Arizona']
-az_gdf.reset_index(drop=True, inplace=True)
-azp = az_gdf.geometry[0]
+# print('\n\tBuilding AZ Boundary Polygon...')
+# az_gdf = usstates_gdf[usstates_gdf.NAME=='Arizona']
+# az_gdf.reset_index(drop=True, inplace=True)
+# azp = az_gdf.geometry[0]
 
-print('\n\tBuilding ID Boundary Polygon...')
-id_gdf = usstates_gdf[usstates_gdf.NAME=='Idaho']
-id_gdf.reset_index(drop=True, inplace=True)
-idp = id_gdf.geometry[0]
+# print('\n\tBuilding ID Boundary Polygon...')
+# id_gdf = usstates_gdf[usstates_gdf.NAME=='Idaho']
+# id_gdf.reset_index(drop=True, inplace=True)
+# idp = id_gdf.geometry[0]
 
-print('\n\tBuilding IA Boundary Polygon...')
-ia_gdf = usstates_gdf[usstates_gdf.NAME=='Iowa']
-ia_gdf.reset_index(drop=True, inplace=True)
-iap = ia_gdf.geometry[0]
+# print('\n\tBuilding IA Boundary Polygon...')
+# ia_gdf = usstates_gdf[usstates_gdf.NAME=='Iowa']
+# ia_gdf.reset_index(drop=True, inplace=True)
+# iap = ia_gdf.geometry[0]
 
-print('\n\tBuilding WA Boundary Polygon...')
-wa_gdf = usstates_gdf[usstates_gdf.NAME=='Washington']
-wa_gdf.reset_index(drop=True, inplace=True)
-wap = wa_gdf.geometry[0]
+# print('\n\tBuilding WA Boundary Polygon...')
+# wa_gdf = usstates_gdf[usstates_gdf.NAME=='Washington']
+# wa_gdf.reset_index(drop=True, inplace=True)
+# wap = wa_gdf.geometry[0]
 
-print('\n\tBuilding TX Boundary Polygon...')
-tx_gdf = usstates_gdf[usstates_gdf.NAME=='Texas']
-tx_gdf.reset_index(drop=True, inplace=True)
-txp = tx_gdf.geometry[0]
+# print('\n\tBuilding TX Boundary Polygon...')
+# tx_gdf = usstates_gdf[usstates_gdf.NAME=='Texas']
+# tx_gdf.reset_index(drop=True, inplace=True)
+# txp = tx_gdf.geometry[0]
 
-print('\n\tBuilding FL Boundary Polygon...')
-fl_gdf = usstates_gdf[usstates_gdf.NAME=='Florida']
-fl_gdf.reset_index(drop=True, inplace=True)
-flp = fl_gdf.geometry[0]
+# print('\n\tBuilding FL Boundary Polygon...')
+# fl_gdf = usstates_gdf[usstates_gdf.NAME=='Florida']
+# fl_gdf.reset_index(drop=True, inplace=True)
+# flp = fl_gdf.geometry[0]
 
-print('\n\tBuilding OR Boundary Polygon...')
-or_gdf = usstates_gdf[usstates_gdf.NAME=='Oregon']
-or_gdf.reset_index(drop=True, inplace=True)
-orp = or_gdf.geometry[0]
-
-
-print('\n\tBuilding OK Boundary Polygon...')
-ok_gdf = usstates_gdf[usstates_gdf.NAME=='Oklahoma']
-ok_gdf.reset_index(drop=True, inplace=True)
-okp = ok_gdf.geometry[0]
+# print('\n\tBuilding OR Boundary Polygon...')
+# or_gdf = usstates_gdf[usstates_gdf.NAME=='Oregon']
+# or_gdf.reset_index(drop=True, inplace=True)
+# orp = or_gdf.geometry[0]
 
 
-print('\n\tBuilding MT Boundary Polygon...')
-mt_gdf = usstates_gdf[usstates_gdf.NAME=='Montana']
-mt_gdf.reset_index(drop=True, inplace=True)
-mtp = mt_gdf.geometry[0]
+# print('\n\tBuilding OK Boundary Polygon...')
+# ok_gdf = usstates_gdf[usstates_gdf.NAME=='Oklahoma']
+# ok_gdf.reset_index(drop=True, inplace=True)
+# okp = ok_gdf.geometry[0]
 
 
-print('\n\tBuilding MO Boundary Polygon...')
-mo_gdf = usstates_gdf[usstates_gdf.NAME=='Missouri']
-mo_gdf.reset_index(drop=True, inplace=True)
-mop = mo_gdf.geometry[0]
+# print('\n\tBuilding MT Boundary Polygon...')
+# mt_gdf = usstates_gdf[usstates_gdf.NAME=='Montana']
+# mt_gdf.reset_index(drop=True, inplace=True)
+# mtp = mt_gdf.geometry[0]
 
 
-print('\n\tBuilding DE Boundary Polygon...')
-de_gdf = usstates_gdf[usstates_gdf.NAME=='Delaware']
-de_gdf.reset_index(drop=True, inplace=True)
-dep = de_gdf.geometry[0]
+# print('\n\tBuilding MO Boundary Polygon...')
+# mo_gdf = usstates_gdf[usstates_gdf.NAME=='Missouri']
+# mo_gdf.reset_index(drop=True, inplace=True)
+# mop = mo_gdf.geometry[0]
 
 
-print('\n\tBuilding AR Boundary Polygon...')
-ar_gdf = usstates_gdf[usstates_gdf.NAME=='Arkansas']
-ar_gdf.reset_index(drop=True, inplace=True)
-arp = ar_gdf.geometry[0]
+# print('\n\tBuilding DE Boundary Polygon...')
+# de_gdf = usstates_gdf[usstates_gdf.NAME=='Delaware']
+# de_gdf.reset_index(drop=True, inplace=True)
+# dep = de_gdf.geometry[0]
 
 
-print('\nBuilding Global Boundary Polygons...')
-wrs_gdf = gpd.read_file(worldShpFile)
-wrs_gdf = wrs_gdf.to_crs(4326)
+# print('\n\tBuilding AR Boundary Polygon...')
+# ar_gdf = usstates_gdf[usstates_gdf.NAME=='Arkansas']
+# ar_gdf.reset_index(drop=True, inplace=True)
+# arp = ar_gdf.geometry[0]
 
 
-print('\n\tBuilding ISR Boundary Polygon...')
-isr_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Israel']
-isr_gdf.reset_index(drop=True, inplace=True)
-isrp = isr_gdf.geometry[0]
-
-print('\n\tBuilding IND Boundary Polygon...')
-ind_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='India']
-ind_gdf.reset_index(drop=True, inplace=True)
-ind_gdf = ind_gdf.to_crs(4326)
-ind_poly_list = [row.geometry for i,row in ind_gdf.iterrows()]
-indp_list = []
-for p in ind_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        indp_list=indp_list+list(p) #Break up the polygons itn
-    else:
-        indp_list.append(p)
-print('Done!')
-#indp = ind_gdf.geometry[0]
-
-print('\n\tBuilding MEX Boundary Polygon...')
-mex_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Mexico']
-mex_gdf.reset_index(drop=True, inplace=True)
-mex_gdf = mex_gdf.to_crs(4326)
-mex_poly_list = [row.geometry for i,row in mex_gdf.iterrows()]
-mexp_list = []
-for p in mex_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        mexp_list=mexp_list+list(p) #Break up the polygons itn
-    else:
-        mexp_list.append(p)
-print('Done!')
-
-print('\n\tBuilding EGY Boundary Polygon...')
-egy_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Egypt']
-egy_gdf.reset_index(drop=True, inplace=True)
-egy_gdf = egy_gdf.to_crs(4326)
-egy_poly_list = [row.geometry for i,row in egy_gdf.iterrows()]
-egyp_list = []
-for p in egy_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        egyp_list=egyp_list+list(p) #Break up the polygons itn
-    else:
-        egyp_list.append(p)
-print('Done!')
-
-print('\n\tBuilding CAN Boundary Polygon...')
-can_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Canada']
-can_gdf.reset_index(drop=True, inplace=True)
-can_gdf = can_gdf.to_crs(4326)
-can_poly_list = [row.geometry for i,row in can_gdf.iterrows()]
-canp_list = []
-for p in can_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        canp_list=canp_list+list(p) #Break up the polygons itn
-    else:
-        canp_list.append(p)
-print('Done!')
-
-print('\n\tBuilding PAK Boundary Polygon...')
-pak_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Pakistan']
-pak_gdf.reset_index(drop=True, inplace=True)
-pak_gdf = pak_gdf.to_crs(4326)
-pak_poly_list = [row.geometry for i,row in pak_gdf.iterrows()]
-pakp_list = []
-for p in pak_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        pakp_list=pakp_list+list(p) #Break up the polygons itn
-    else:
-        pakp_list.append(p)
-print('Done!')
+# print('\nBuilding Global Boundary Polygons...')
+# wrs_gdf = gpd.read_file(worldShpFile)
+# wrs_gdf = wrs_gdf.to_crs(4326)
 
 
-print('\n\tBuilding UK Boundary Polygon...')
-uk_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='United Kingdom']
-uk_gdf.reset_index(drop=True, inplace=True)
-ukp = uk_gdf.geometry[0]
+# print('\n\tBuilding ISR Boundary Polygon...')
+# isr_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Israel']
+# isr_gdf.reset_index(drop=True, inplace=True)
+# isrp = isr_gdf.geometry[0]
+
+# print('\n\tBuilding IND Boundary Polygon...')
+# ind_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='India']
+# ind_gdf.reset_index(drop=True, inplace=True)
+# ind_gdf = ind_gdf.to_crs(4326)
+# ind_poly_list = [row.geometry for i,row in ind_gdf.iterrows()]
+# indp_list = []
+# for p in ind_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         indp_list=indp_list+list(p) #Break up the polygons itn
+#     else:
+#         indp_list.append(p)
+# print('Done!')
+# #indp = ind_gdf.geometry[0]
+
+# print('\n\tBuilding MEX Boundary Polygon...')
+# mex_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Mexico']
+# mex_gdf.reset_index(drop=True, inplace=True)
+# mex_gdf = mex_gdf.to_crs(4326)
+# mex_poly_list = [row.geometry for i,row in mex_gdf.iterrows()]
+# mexp_list = []
+# for p in mex_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         mexp_list=mexp_list+list(p) #Break up the polygons itn
+#     else:
+#         mexp_list.append(p)
+# print('Done!')
+
+# print('\n\tBuilding EGY Boundary Polygon...')
+# egy_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Egypt']
+# egy_gdf.reset_index(drop=True, inplace=True)
+# egy_gdf = egy_gdf.to_crs(4326)
+# egy_poly_list = [row.geometry for i,row in egy_gdf.iterrows()]
+# egyp_list = []
+# for p in egy_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         egyp_list=egyp_list+list(p) #Break up the polygons itn
+#     else:
+#         egyp_list.append(p)
+# print('Done!')
+
+# print('\n\tBuilding CAN Boundary Polygon...')
+# can_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Canada']
+# can_gdf.reset_index(drop=True, inplace=True)
+# can_gdf = can_gdf.to_crs(4326)
+# can_poly_list = [row.geometry for i,row in can_gdf.iterrows()]
+# canp_list = []
+# for p in can_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         canp_list=canp_list+list(p) #Break up the polygons itn
+#     else:
+#         canp_list.append(p)
+# print('Done!')
+
+# print('\n\tBuilding PAK Boundary Polygon...')
+# pak_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Pakistan']
+# pak_gdf.reset_index(drop=True, inplace=True)
+# pak_gdf = pak_gdf.to_crs(4326)
+# pak_poly_list = [row.geometry for i,row in pak_gdf.iterrows()]
+# pakp_list = []
+# for p in pak_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         pakp_list=pakp_list+list(p) #Break up the polygons itn
+#     else:
+#         pakp_list.append(p)
+# print('Done!')
 
 
-print('\n\tBuilding AUS Boundary Polygons...')
-"""
-list_of_ausstate_shapefiles = [aus_data_dir+x for x in os.listdir(aus_data_dir) if x.endswith('.shp')]
-aus_gdf = gpd.GeoDataFrame()
-for stateShpFile in list_of_ausstate_shapefiles:
-    ausstates_gdf = gpd.read_file(stateShpFile, driver='SHAPEFILE')
-    aus_gdf = aus_gdf.append(ausstates_gdf, ignore_index=True)
-aus_gdf = aus_gdf.to_crs(4326)
-ausregions_gdf = aus_gdf.dissolve(by='STATE_PID')
-ausregions_gdf.reset_index(drop=True, inplace=True)
-ausregions_gdf = ausregions_gdf.to_crs(4326)
-aus_poly_list = [row.geometry for i,row in ausregions_gdf.iterrows()]
+# print('\n\tBuilding UK Boundary Polygon...')
+# uk_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='United Kingdom']
+# uk_gdf.reset_index(drop=True, inplace=True)
+# ukp = uk_gdf.geometry[0]
 
 
-aus_shapefile = aus_data_dir + 'IDM00013.shp'
-aus_gdf = gpd.read_file(aus_shapefile, driver='SHAPEFILE')
-aus_gdf = aus_gdf.to_crs(4326)
-"""
-aus_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Australia']
-aus_gdf.reset_index(drop=True, inplace=True)
-aus_gdf = aus_gdf.to_crs(4326)
-aus_poly_list = [row.geometry for i,row in aus_gdf.iterrows()]
+# print('\n\tBuilding AUS Boundary Polygons...')
+# """
+# list_of_ausstate_shapefiles = [aus_data_dir+x for x in os.listdir(aus_data_dir) if x.endswith('.shp')]
+# aus_gdf = gpd.GeoDataFrame()
+# for stateShpFile in list_of_ausstate_shapefiles:
+#     ausstates_gdf = gpd.read_file(stateShpFile, driver='SHAPEFILE')
+#     aus_gdf = aus_gdf.append(ausstates_gdf, ignore_index=True)
+# aus_gdf = aus_gdf.to_crs(4326)
+# ausregions_gdf = aus_gdf.dissolve(by='STATE_PID')
+# ausregions_gdf.reset_index(drop=True, inplace=True)
+# ausregions_gdf = ausregions_gdf.to_crs(4326)
+# aus_poly_list = [row.geometry for i,row in ausregions_gdf.iterrows()]
 
 
-ausp_list = []
-for p in aus_poly_list:
-    if type(p)==shapely.geometry.multipolygon.MultiPolygon:
-        ausp_list=ausp_list+list(p) #Break up the polygons itn
-    else:
-        ausp_list.append(p)
-print('Done!')
+# aus_shapefile = aus_data_dir + 'IDM00013.shp'
+# aus_gdf = gpd.read_file(aus_shapefile, driver='SHAPEFILE')
+# aus_gdf = aus_gdf.to_crs(4326)
+# """
+# aus_gdf = wrs_gdf[wrs_gdf.CNTRY_NAME=='Australia']
+# aus_gdf.reset_index(drop=True, inplace=True)
+# aus_gdf = aus_gdf.to_crs(4326)
+# aus_poly_list = [row.geometry for i,row in aus_gdf.iterrows()]
 
 
-print('\nGetting All Satellite Scenes...')
-gdf_S = getAllSentinelScenePolygons()
-gdf_L = getAllLandsatScenePolygons()
-S_gdf = gdf_S.copy() #for same call, different name
-print('Done!')
+# ausp_list = []
+# for p in aus_poly_list:
+#     if type(p)==shapely.geometry.multipolygon.MultiPolygon:
+#         ausp_list=ausp_list+list(p) #Break up the polygons itn
+#     else:
+#         ausp_list.append(p)
+# print('Done!')
+
+
+# print('\nGetting All Satellite Scenes...')
+# gdf_S = getAllSentinelScenePolygons()
+# gdf_L = getAllLandsatScenePolygons()
+# S_gdf = gdf_S.copy() #for same call, different name
+# print('Done!')
 
 
 os.environ['ASSET_REGISTRY_BASE_URL'] = 'https://api-ar.agstack.org/'
 from shapely import wkt
+
 def fetchWKT(geoid):
     """
     Fetch the Well-Known Text (WKT) representation of a polygon for a given geoid.
@@ -13539,3 +14016,205 @@ def extractLatLonFromWKT(wkt_polygon):
     except Exception as e:
         print(f"Error processing WKT with Shapely: {e}")
         return None, None
+    
+    
+session = requests.session()
+session.headers = headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json'
+
+}
+
+asset_registry_base = "https://api-ar.agstack.org"
+
+def polygon_to_s2_tokens(geoid, level):
+    import s2sphere
+    """
+    Convert a geoid into a Polygon WKT string to a GeoDataFrame containing all S2 tokens 
+    that cover the polygon, along with the geometry of each token as a Polygon.
+
+    Parameters:
+        polygon_wkt (str): The WKT string representing the polygon.
+        level (int): The S2 cell level. Default is 10.
+
+    Returns:
+        geopandas.GeoDataFrame: A GeoDataFrame with two columns: 's2_token' and 'geometry'.
+    """
+
+    if not level:
+        level=10
+    #print('level='+str(level))
+
+        # Define the request body (adjust based on API requirements)
+    req_body = {
+        "level": level  # Example key-value pair; modify as per the API documentation
+    }
+
+    res = session.get(asset_registry_base +"/fetch-field-wkt/"+geoid, json=req_body)
+    polygon_wkt = res.json().get('WKT')
+       
+    # Convert WKT to Shapely Polygon
+    polygon = wkt.loads(polygon_wkt)
+
+    
+    # Extract polygon vertices as LatLng points
+    vertices = [
+        s2sphere.LatLng.from_degrees(lat, lon)
+        for lon, lat in polygon.exterior.coords
+    ]
+    #print('vertices='+str(vertices))
+    
+    # Use S2RegionCoverer to find covering cells
+    region_coverer = s2sphere.RegionCoverer()
+    region_coverer.min_level = level
+    region_coverer.max_level = level
+
+    #print(vertices[0], vertices[2])
+    # Cover the bounding box of the polygon
+    rect = s2sphere.LatLngRect.from_point_pair(vertices[0], vertices[2])
+    cell_ids = region_coverer.get_covering(rect)
+    #print(cell_ids)
+    
+    # Collect S2 tokens and geometries
+    rows = []
+    for cell_id in cell_ids:
+        #print('level='+str(cell_id.level()))
+        
+        cell = s2sphere.Cell(cell_id)
+        cell_vertices = [
+            s2sphere.LatLng.from_point(cell.get_vertex(i))
+            for i in range(4)
+        ]
+        coords = [
+            (v.lng().degrees, v.lat().degrees)
+            for v in cell_vertices
+        ]
+        coords.append(coords[0])  # Close the polygon
+        
+        # Create a Shapely Polygon
+        cell_polygon = wkt.loads(
+            f"POLYGON(({','.join([f'{lon} {lat}' for lon, lat in coords])}))"
+        )
+        
+        # Append the S2 token and geometry
+        try:
+            rows.append({
+                's2_index__L8': cell_id.parent(8).to_token(),
+                's2_index__L10': cell_id.parent(10).to_token(),  # This can fail if level is too low
+                's2_index__L'+str(level): cell_id.to_token(),
+                'geometry': cell_polygon
+            })
+        except AssertionError:
+            # Handle the error gracefully, maybe skip this row or log a warning
+            pass
+
+
+    # Create a GeoDataFrame for the Polygon
+    field_gdf = gpd.GeoDataFrame({'geometry': [polygon]})
+    
+    # Add additional columns
+    field_gdf['geoid'] = [geoid]
+    
+    # Set a CRS (Coordinate Reference System) if needed
+    field_gdf.set_crs(epsg=4326, inplace=True)  # WGS84
+    
+    # Create and return both the GeoDataFrames
+    gdf = gpd.GeoDataFrame(rows, columns=['s2_index__L8', 's2_index__L10', 's2_index__L'+str(level), 'geometry'])
+
+    #convert to the same CRS 4326
+    field_gdf = field_gdf.set_crs(epsg=4326)
+    gdf = gdf.set_crs(epsg=4326)
+    
+    return gdf, field_gdf
+
+
+def polygon_to_s2_tokens_tmf(geoid, level):
+    import s2sphere
+
+    if not level:
+        level=8
+    #print('level='+str(level))
+
+        # Define the request body (adjust based on API requirements)
+    req_body = {
+        "level": level  # Example key-value pair; modify as per the API documentation
+    }
+
+    res = session.get(asset_registry_base +"/fetch-field-wkt/"+geoid, json=req_body)
+    polygon_wkt = res.json().get('WKT')
+       
+    # Convert WKT to Shapely Polygon
+    polygon = wkt.loads(polygon_wkt)
+
+    
+    # Extract polygon vertices as LatLng points
+    vertices = [
+        s2sphere.LatLng.from_degrees(lat, lon)
+        for lon, lat in polygon.exterior.coords
+    ]
+    #print('vertices='+str(vertices))
+    
+    # Use S2RegionCoverer to find covering cells
+    region_coverer = s2sphere.RegionCoverer()
+    region_coverer.min_level = level
+    region_coverer.max_level = level
+
+    #print(vertices[0], vertices[2])
+    # Cover the bounding box of the polygon
+    rect = s2sphere.LatLngRect.from_point_pair(vertices[0], vertices[2])
+    cell_ids = region_coverer.get_covering(rect)
+    #print(cell_ids)
+    
+    # Collect S2 tokens and geometries
+    rows = []
+    for cell_id in cell_ids:
+        #print('level='+str(cell_id.level()))
+        
+        cell = s2sphere.Cell(cell_id)
+        cell_vertices = [
+            s2sphere.LatLng.from_point(cell.get_vertex(i))
+            for i in range(4)
+        ]
+        coords = [
+            (v.lng().degrees, v.lat().degrees)
+            for v in cell_vertices
+        ]
+        coords.append(coords[0])  # Close the polygon
+        
+        # Create a Shapely Polygon
+        cell_polygon = wkt.loads(
+            f"POLYGON(({','.join([f'{lon} {lat}' for lon, lat in coords])}))"
+        )
+        
+        # Append the S2 token and geometry
+        try:
+            rows.append({
+                's2_index__L3': cell_id.parent(3).to_token(),
+                's2_index__L8': cell_id.parent(8).to_token(),
+                's2_index__L13': cell_id.parent(13).to_token(),
+                # 's2_index__L10': cell_id.parent(10).to_token(),  # This can fail if level is too low
+                's2_index__L'+str(level): cell_id.to_token(),
+                'geometry': cell_polygon
+            })
+        except AssertionError:
+            # Handle the error gracefully, maybe skip this row or log a warning
+            pass
+
+
+    # Create a GeoDataFrame for the Polygon
+    field_gdf = gpd.GeoDataFrame({'geometry': [polygon]})
+    
+    # Add additional columns
+    field_gdf['geoid'] = [geoid]
+    
+    # Set a CRS (Coordinate Reference System) if needed
+    field_gdf.set_crs(epsg=4326, inplace=True)  # WGS84
+    
+    # Create and return both the GeoDataFrames
+    gdf = gpd.GeoDataFrame(rows, columns=['s2_index__L3','s2_index__L8','s2_index__L13','s2_index__L'+str(level), 'geometry'])
+
+    #convert to the same CRS 4326
+    field_gdf = field_gdf.set_crs(epsg=4326)
+    gdf = gdf.set_crs(epsg=4326)
+    
+    return gdf, field_gdf
