@@ -8612,6 +8612,3173 @@ def generateETc_NOAA(merged_df):
                     }
                     with open(infoJsonFile, 'w', encoding='utf8') as outfile:
                         json.dump(imgDict, outfile, ensure_ascii=False)
+<<<<<<< HEAD
+=======
+
+                    plt.ioff();
+                    with open(imgFile, 'wb') as outfile:
+                        fig = plt.figure()
+                        plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                        fig.gca().set_axis_off()
+                        plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                        plt.close();
+                        
+                    with open(pklFile,'wb') as f:
+                        pickle.dump(ndvi_img, f)
+                
+                    retdf = ndvi_df.loc[0]
+                    ndvi_mean = retdf.Mean
+                    ndvi_p90 = retdf.p90
+                    ndvi_p25 = retdf.p25
+                    ndvi_p75 = retdf.p75
+                    ndvi_median = retdf.Median
+                    ndvi_std = retdf.StdDev
+                    
+                else:
+                    #set values if NaN
+                    ndvi_mean = np.nan
+                    ndvi_p90 = np.nan
+                    ndvi_p25 = np.nan
+                    ndvi_p75 = np.nan
+                    ndvi_median = np.nan
+                    ndvi_std = np.nan
+                    
+                #print(['NDVI_mean = '+str(ndvi_mean)])
+                #derived
+                ndvi_unif = (ndvi_p25 / ndvi_median)*100
+            
+                #compute the METRIC ETc
+                #print('Metric inputs:')
+                #print([tavg,rnet,wavg,ndvi_mean])
+                et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+                
+                ##########if et_metric is NaN, make it zero
+                if (np.isnan(et_metric)):
+                    et_metric=0.0
+
+                #print('ETc metric='+str(et_metric))
+                #the Kc
+                fac = 1.35 #somewhat arbitrary for now
+                k_c = 1.3558*ndvi_mean*fac + 0.05
+                k_c2 = 1.3558*ndvi_mean + 0.05
+            
+                #compute the ETc
+                et_ndvi = eto*k_c
+                et_ndvi2 = eto*k_c2
+            
+                #get the final ETc
+                # Include et_metric
+                k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+                
+                k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                et_p90 = eto*k_c_p90
+                
+                #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+                acctGDF_date.loc[i,'ETc']=et_c
+                acctGDF_date.loc[i,'ETc_low']=et_c2
+                acctGDF_date.loc[i,'Kc']=k_c
+                acctGDF_date.loc[i,'ETm']=et_metric
+                acctGDF_date.loc[i,'ET_p90']=et_p90
+                acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                acctGDF_date.loc[i,'Precipitation(in)']=precip
+                acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+                
+
+            acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+            acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+            acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+            acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+            print(acctGDF_date.ETc.tolist())
+            
+            #save the values
+            acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        print("\tEND --- %s seconds ---" % (time.time() - starta))
+        print('\tDone!')
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+def generateETc_NOAA2(merged_df):
+
+    unique_accounts = pd.unique(merged_df.Category)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = str(acct)
+        try:
+            starta = time.time()
+            
+            print('\n\tWriting...%s ' % a)
+            print("\tStart --- %s  ---" % datetime.now())
+            acctName = a.upper()
+            acct_dir = agls_acctOutputPath + a + '/data/'
+            acct_dir_img = agls_acctOutputPath + a + '/images/'
+            acct_dir_pkl = agls_acctOutputPath + a + '/pkl/'
+            acct_dir_rep = agls_acctOutputPath + a + '/reports/'
+                
+            #create the directory if one doesn't exist
+            if not os.path.exists(acct_dir):
+                os.makedirs(acct_dir)
+            if not os.path.exists(acct_dir_img):
+                os.makedirs(acct_dir_img)
+            if not os.path.exists(acct_dir_pkl):
+                os.makedirs(acct_dir_pkl)
+            if not os.path.exists(acct_dir_rep):
+                os.makedirs(acct_dir_rep)
+                
+            #For each account, take the subset of the acct_df 
+            acctDF = merged_df[merged_df.Category == acct]
+            
+            acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+
+            #print(type(acctGDF))
+            
+            #for every day, do the following analysis and printout
+            acct_dates_list = acctGDF.Date.tolist()
+            unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+            unique_dts.sort()
+            
+            for dt in unique_dts:
+                
+                endDay = dt        
+                
+                startd = time.time()
+                #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+                etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+                jsonFile = acct_dir + acctName+'_ET_'+etoDateStr+'.json'
+                
+                acctGDF_date = acctGDF[acctGDF.Date==dt]
+                acctGDF_date.reset_index(drop=True, inplace=True)
+
+                #Convert back to GPD
+                #acctGDF_date = gpd.GeoDataFrame(acctGDF_date, geometry=acctDF.geometry)
+                
+                print('\t\t'+etoDateStr)
+                #print(acctGDF_date.columns)
+                for i,row in acctGDF_date.iterrows():
+
+                    acct = row.Category
+                    ranch = row.SubCategory
+                    field = row.Name
+                    fieldName = field.upper()
+                    
+                    #ETo and weather values
+                    #print('row: '+str(row))
+
+                    eto = row['ETo(in)']
+                    tavg = row['Tavg']
+                    rnet = row['Rnet']
+                    wavg = row['Wavg']
+                    ############## add others Raw and Deried
+                    precip = row['Precipitation(in)']
+                    maxAirTemp = row['MaximumAirTemperature(F)']
+                    minAirTemp = row['MinimumAirTemperature(F)']
+                    avgAirTemp = row['AverageAirTemperature(F)']
+                    maxRelHumPercent = row['MaximumRelativeHumidity(%)']
+                    minRelHumPercent = row['MinimumRelativeHumidity(%)']
+                    avgRelHumPercent = row['AverageRelativeHumidity(%)']
+                    dewPoint = row['DewPoint(F)']
+                    
+                    #########################################
+                
+                    # NDVI value
+                    #print(row.geometry)
+                    #print(type(row.geometry))
+                    P = getSinglePoly(row.geometry)
+
+                    
+                    ss = row.SentinelFootprint
+                    ll = row.LandsatFootprint
+                    
+                    #do Sentinel
+                    if not type(ss)==list:
+                        if (ss.find(',')==-1): #There is only ONE tile
+                            S = [ss.replace('[','').replace(']','').replace('\'','')]
+                        else:
+                            tok = ss.split(',')
+                            l = len(tok)
+                            S=[]
+                            for ii in range(l):
+                                tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                                S.append(tk)
+                    else:
+                        S = ss
+                    if (type(S)==str):
+                        S = [S]
+                
+                    #do landsat
+                    if not type(ll)==list:
+                        if (ss.find(',')==-1): #There is only ONE tile
+                            L = ll.replace('[','').replace(']','').replace('\'','')
+                        else:
+                            tok = ll.split(', ')
+                            l = len(tok)
+                            L=[]
+                            for ii in range(l):
+                                tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                                L.append(tk.replace(' ',''))
+                    else:
+                        L = [str(x).zfill(6) for x in ll]
+
+                    if (type(L)==str):
+                        L = [L]
+                    
+
+                    #print([S,L,etoDateStr])
+
+                    ndvi_mList_df = pd.DataFrame()
+                    
+                    NDVIFiles_df = getNDVIFilesWithDate(32, S, L, etoDateStr)
+                    NDVIFiles_df.reset_index(drop=True,inplace=True)
+
+                    #print(NDVIFiles_df)
+                    
+                    [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3(NDVIFiles_df,P)
+                    
+                    #print([ndvi_df,ndvi_ext,imgDtStr])
+                    
+                    if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                        ext = json.loads(ndvi_ext)
+                        ndvi_mList_df = ndvi_df.copy()
+                        
+                        
+                        acct_dir_img2 = acct_dir_img 
+                        if not os.path.exists(acct_dir_img2):
+                            os.makedirs(acct_dir_img2)
+                        imgFile = acct_dir_img2 + acctName+'_'+field+'__IMG_'+etoDateStr+'.png'
+                        infoJsonFile = acct_dir_img2 + acctName+'_'+field+'__INFO_'+etoDateStr+'.json'
+
+                        acct_dir_pkl2 = acct_dir_pkl 
+                        if not os.path.exists(acct_dir_pkl2):
+                            os.makedirs(acct_dir_pkl2)
+                        pklFile = acct_dir_pkl2 + acctName+'_'+field+'__PKL_'+etoDateStr+'.pkl'
+                        
+                    
+                        imgDict = {
+                            'ImgFileName': os.path.split(imgFile)[1],
+                            'ImgDate': imgDtStr,
+                            'ImgType': 'ETc',
+                            'ImgExtent': ndvi_ext, 
+                            'ImgBoundary': P.to_wkt(),
+                            'Ranch': ranch,
+                            'Field': field
+                        }
+                        with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                            json.dump(imgDict, outfile, ensure_ascii=False)
+
+                        plt.ioff();
+                        with open(imgFile, 'wb') as outfile:
+                            fig = plt.figure()
+                            plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                            fig.gca().set_axis_off()
+                            plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                            plt.close();
+                            
+                        with open(pklFile,'wb') as f:
+                            pickle.dump(ndvi_img, f)
+                    
+                        retdf = ndvi_df.loc[0]
+                        ndvi_mean = retdf.Mean
+                        ndvi_p90 = retdf.p90
+                        ndvi_p25 = retdf.p25
+                        ndvi_p75 = retdf.p75
+                        ndvi_median = retdf.Median
+                        ndvi_std = retdf.StdDev
+                        
+                    else:
+                        #set values if NaN
+                        ndvi_mean = np.nan
+                        ndvi_p90 = np.nan
+                        ndvi_p25 = np.nan
+                        ndvi_p75 = np.nan
+                        ndvi_median = np.nan
+                        ndvi_std = np.nan
+                        
+                    #print(['NDVI_mean = '+str(ndvi_mean)])
+                    #derived
+                    ndvi_unif = (ndvi_p25 / ndvi_median)*100
+                
+                    #compute the METRIC ETc
+                    #print('Metric inputs:')
+                    #print([tavg,rnet,wavg,ndvi_mean])
+                    et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+                    
+                    ##########if et_metric is NaN, make it zero
+                    if (np.isnan(et_metric)):
+                        et_metric=0.0
+
+                    #print('ETc metric='+str(et_metric))
+                    #the Kc
+                    fac = 1.35 #somewhat arbitrary for now
+                    k_c = 1.3558*ndvi_mean*fac + 0.05
+                    k_c2 = 1.3558*ndvi_mean + 0.05
+                
+                    #compute the ETc
+                    et_ndvi = eto*k_c
+                    et_ndvi2 = eto*k_c2
+                
+                    #get the final ETc
+                    # Include et_metric
+                    k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                    et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                    et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+                    
+                    k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                    et_p90 = eto*k_c_p90
+                    
+                    #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+                    acctGDF_date.loc[i,'ETc']=et_c
+                    acctGDF_date.loc[i,'ETc_low']=et_c2
+                    acctGDF_date.loc[i,'Kc']=k_c
+                    acctGDF_date.loc[i,'ETm']=et_metric
+                    acctGDF_date.loc[i,'ET_p90']=et_p90
+                    acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                    acctGDF_date.loc[i,'Precipitation(in)']=precip
+                    acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                    acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                    acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                    acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                    acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                    acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                    acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+                    
+
+                acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+                acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+                acctGDF_date['to_email_list'] = acctGDF_date['to_email_list'].astype('str')
+                acctGDF_date['cc_email_list'] = acctGDF_date['cc_email_list'].astype('str')
+                acctGDF_date['bcc_email_list'] = acctGDF_date['bcc_email_list'].astype('str')
+                acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+                acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+
+                #print(type(acctGDF_date))
+                print(acctGDF_date.ETc.tolist())
+                
+                #save the values
+                #acctGDF_date = acctGDF_date.astype('str')
+                acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+            print("\tEND --- %s seconds ---" % (time.time() - starta))
+            print('\tDone!')
+        except:
+            print('Exception in Acct: '+str(a))
+            continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+def generateETc_NOAA3(merged_df):
+
+    unique_accounts = pd.unique(merged_df.customerid)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = 'JainlogicCustomerid_'+str(acct)
+        #try:
+        starta = time.time()
+        
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = acctOutputPath + a + '/data/'
+        acct_dir_img = acctOutputPath + a + '/img/'
+        acct_dir_pkl = acctOutputPath + a + '/pkl/'
+        acct_dir_rep = acctOutputPath + a + '/reports/'
+            
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+        if not os.path.exists(acct_dir_img):
+            os.makedirs(acct_dir_img)
+        if not os.path.exists(acct_dir_pkl):
+            os.makedirs(acct_dir_pkl)
+        if not os.path.exists(acct_dir_rep):
+            os.makedirs(acct_dir_rep)
+            
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.customerid == acct]
+        
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+        
+        #for every day, do the following analysis and printout
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+        for dt in unique_dts:
+            
+            endDay = dt        
+            
+            startd = time.time()
+            #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+            etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+            jsonFile = acct_dir + acctName+'__ET_'+etoDateStr+'.json'
+            
+            acctGDF_date = acctGDF[acctGDF.Date==dt]
+            acctGDF_date.reset_index(drop=True, inplace=True)
+            
+            print('\t\t'+etoDateStr)
+            #print(acctGDF_date.columns)
+            for i,row in acctGDF_date.iterrows():
+
+                customerid = str(row.customerid)
+                acct = row.Category
+                ranch = row.SubCategory
+                field = row.Name
+                fieldassetid = 'ASSETID_'+str(row.fieldassetid)
+
+                #ETo and weather values
+                #print('row: '+str(row))
+                if 'Tavg' in row.index.tolist():
+                    eto = row['ETo(in)']
+                    tavg = row['Tavg']
+                    rnet = row['Rnet']
+                    wavg = row['Wavg']
+                    ############## add others Raw and Deried
+                    precip = row['Precipitation(in)']
+                    maxAirTemp = row['MaximumAirTemperature(F)']
+                    minAirTemp = row['MinimumAirTemperature(F)']
+                    avgAirTemp = row['AverageAirTemperature(F)']
+                    maxRelHumPercent = row['MaximumRelativeHumidity(%)']
+                    minRelHumPercent = row['MinimumRelativeHumidity(%)']
+                    avgRelHumPercent = row['AverageRelativeHumidity(%)']
+                    dewPoint = row['DewPoint(F)']
+                else:
+                    eto = row['ETo(in)']
+
+                #########################################
+
+                P = getSinglePoly(row.geometry)
+
+
+                ss = row.SentinelFootprint
+                ll = row.LandsatFootprint
+
+                #do Sentinel
+                if not type(ss)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        S = [ss.replace('[','').replace(']','').replace('\'','')]
+                    else:
+                        tok = ss.split(',')
+                        l = len(tok)
+                        S=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            S.append(tk)
+                else:
+                    S = ss
+                if (type(S)==str):
+                    S = [S]
+
+                #do landsat
+                if not type(ll)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        L = ll.replace('[','').replace(']','').replace('\'','')
+                    else:
+                        tok = ll.split(', ')
+                        l = len(tok)
+                        L=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            L.append(tk.replace(' ',''))
+                else:
+                    L = [str(x).zfill(6) for x in ll]
+
+                if (type(L)==str):
+                    L = [L]
+
+
+                #print([S,L,etoDateStr])
+
+                ndvi_mList_df = pd.DataFrame()
+
+                NDVIFiles_df = getNDVIFilesWithDate(62, S, L, etoDateStr)
+                NDVIFiles_df.reset_index(drop=True,inplace=True)
+
+                #print(NDVIFiles_df)
+
+                [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3(NDVIFiles_df,P)
+
+                #print([ndvi_df,ndvi_ext,imgDtStr])
+
+                if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                    ext = json.loads(ndvi_ext)
+                    ndvi_mList_df = ndvi_df.copy()
+                    
+                    
+                    acct_dir_img2 = acct_dir_img + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_img2):
+                        os.makedirs(acct_dir_img2)
+                    imgFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__IMG_'+etoDateStr+'.png'
+                    infoJsonFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__INFO_'+etoDateStr+'.json'
+
+                    acct_dir_pkl2 = acct_dir_pkl + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_pkl2):
+                        os.makedirs(acct_dir_pkl2)
+                    pklFile = acct_dir_pkl2 + acctName+'_'+fieldassetid+'__PKL_'+etoDateStr+'.pkl'
+                    
+                
+                    imgDict = {
+                        'ImgFileName': os.path.split(imgFile)[1],
+                        'ImgDate': imgDtStr,
+                        'ImgType': 'ETc',
+                        'ImgExtent': ndvi_ext, 
+                        'ImgBoundary': P.to_wkt(),
+                        'AssetID': row.fieldassetid,
+                        'CustomerID':a.split('_')[1],
+                        'Ranch': ranch,
+                        'Field': field
+                    }
+                    with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                        json.dump(imgDict, outfile, ensure_ascii=False)
+
+                    plt.ioff();
+                    with open(imgFile, 'wb') as outfile:
+                        fig = plt.figure()
+                        plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                        fig.gca().set_axis_off()
+                        plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                        plt.close();
+
+                    with open(pklFile,'wb') as f:
+                        pickle.dump(ndvi_img, f)
+
+                    retdf = ndvi_df.loc[0]
+                    ndvi_mean = retdf.Mean
+                    ndvi_p90 = retdf.p90
+                    ndvi_p25 = retdf.p25
+                    ndvi_p75 = retdf.p75
+                    ndvi_median = retdf.Median
+                    ndvi_std = retdf.StdDev
+
+                else:
+                    #set values if NaN
+                    ndvi_mean = np.nan
+                    ndvi_p90 = np.nan
+                    ndvi_p25 = np.nan
+                    ndvi_p75 = np.nan
+                    ndvi_median = np.nan
+                    ndvi_std = np.nan
+
+                #print(['NDVI_mean = '+str(ndvi_mean)])
+                #derived
+                ndvi_unif = (ndvi_p25 / ndvi_median)*100
+
+                #compute the METRIC ETc
+                if 'Tavg' in row.index.tolist():
+                    et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+                else:
+                    et_metric=0.0
+
+                ##########if et_metric is NaN, make it zero
+                if (np.isnan(et_metric)):
+                    et_metric=0.0
+
+                #print('ETc metric='+str(et_metric))
+                #the Kc
+                fac = 1.35 #somewhat arbitrary for now
+                k_c = 1.3558*ndvi_mean*fac + 0.05
+                k_c2 = 1.3558*ndvi_mean + 0.05
+
+                #compute the ETc
+                et_ndvi = eto*k_c
+                et_ndvi2 = eto*k_c2
+
+                #get the final ETc
+                # Include et_metric
+                k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+
+                k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                et_p90 = eto*k_c_p90
+
+                #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+                acctGDF_date.loc[i,'ETc']=et_c
+                acctGDF_date.loc[i,'ETc_low']=et_c2
+                acctGDF_date.loc[i,'Kc']=k_c
+                acctGDF_date.loc[i,'ETm']=et_metric
+                acctGDF_date.loc[i,'ET_p90']=et_p90
+                acctGDF_date.loc[i,'ET_p25']=ndvi_p25
+                acctGDF_date.loc[i,'ET_p75']=ndvi_p75
+                acctGDF_date.loc[i,'ET_median']=ndvi_median
+                acctGDF_date.loc[i,'ET_StdDev']=ndvi_std
+                acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                if 'Tavg' in row.index.tolist():
+                    acctGDF_date.loc[i,'Precipitation(in)']=precip
+                    acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                    acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                    acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                    acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                    acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                    acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                    acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+
+
+            acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+            acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+            acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+            acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+
+            #print(type(acctGDF_date))
+            print(acctGDF_date.ETc.tolist())
+
+            #save the values
+            #acctGDF_date = acctGDF_date.astype('str')
+            #print(jsonFile)
+            acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        print("\tEND --- %s seconds ---" % (time.time() - starta))
+        print('\tDone!')
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+
+def generate_AUS_ETc(merged_df):
+
+    unique_accounts = pd.unique(merged_df.customerid)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = 'JainlogicCustomerid_'+str(acct)
+        #try:
+        starta = time.time()
+
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = acctOutputPath + a + '/data/'
+        acct_dir_img = acctOutputPath + a + '/img/'
+        acct_dir_pkl = acctOutputPath + a + '/pkl/'
+        acct_dir_rep = acctOutputPath + a + '/reports/'
+
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+        if not os.path.exists(acct_dir_img):
+            os.makedirs(acct_dir_img)
+        if not os.path.exists(acct_dir_pkl):
+            os.makedirs(acct_dir_pkl)
+        if not os.path.exists(acct_dir_rep):
+            os.makedirs(acct_dir_rep)
+
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.customerid == acct]
+
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+
+        #for every day, do the following analysis and printout
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+        #print(unique_dts)
+        #print(acctGDF.columns)
+        #print(acctGDF.head())
+
+        for dt in unique_dts:
+
+            endDay = dt        
+
+            startd = time.time()
+            #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+            etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+            jsonFile = acct_dir + acctName+'__ET_'+etoDateStr+'.json'
+
+            acctGDF_date = acctGDF[acctGDF.Date==dt]
+            acctGDF_date.reset_index(drop=True, inplace=True)
+
+            print('\t\t'+etoDateStr)
+            #print(acctGDF_date.columns)
+            for i,row in acctGDF_date.iterrows():
+
+                customerid = str(row.customerid)
+                acct = row.Category
+                ranch = row.SubCategory
+                field = row.Name
+                fieldassetid = 'ASSETID_'+str(row.fieldassetid)
+
+                #ETo and weather values
+                #print('row: '+str(row))
+                if 'Tavg' in row.index.tolist():
+                    eto = row['ETo(in)']
+                    tavg = row['Tavg']
+                    rnet = row['Rnet']
+                    wavg = row['Wavg']
+                    ############## add others Raw and Deried
+                    precip = row['Precipitation(in)']
+                    maxAirTemp = row['MaximumAirTemperature(F)']
+                    minAirTemp = row['MinimumAirTemperature(F)']
+                    avgAirTemp = row['AverageAirTemperature(F)']
+                    maxRelHumPercent = row['MaximumRelativeHumidity(%)']
+                    minRelHumPercent = row['MinimumRelativeHumidity(%)']
+                    avgRelHumPercent = row['AverageRelativeHumidity(%)']
+                    dewPoint = row['DewPoint(F)']
+                else:
+                    eto = row['ETo(in)']
+
+                #########################################
+
+                P = getSinglePoly(row.geometry)
+
+
+                ss = row.SentinelFootprint
+                ll = row.LandsatFootprint
+
+                #do Sentinel
+                if not type(ss)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        S = [ss.replace('[','').replace(']','').replace('\'','')]
+                    else:
+                        tok = ss.split(',')
+                        l = len(tok)
+                        S=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            S.append(tk)
+                else:
+                    S = ss
+                if (type(S)==str):
+                    S = [S]
+
+                #do landsat
+                if not type(ll)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        L = ll.replace('[','').replace(']','').replace('\'','')
+                    else:
+                        tok = ll.split(', ')
+                        l = len(tok)
+                        L=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            L.append(tk.replace(' ',''))
+                else:
+                    L = [str(x).zfill(6) for x in ll]
+
+                if (type(L)==str):
+                    L = [L]
+
+
+                #print([S,L,etoDateStr])
+
+                ndvi_mList_df = pd.DataFrame()
+
+                NDVIFiles_df = getNDVIFilesWithDate(62, S, L, etoDateStr)
+                NDVIFiles_df.reset_index(drop=True,inplace=True)
+
+                #print(NDVIFiles_df)
+
+                [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3(NDVIFiles_df,P)
+                
+                #print(ndvi_df)
+
+                #print([ndvi_df,ndvi_ext,imgDtStr])
+
+                if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                    ext = json.loads(ndvi_ext)
+                    ndvi_mList_df = ndvi_df.copy()
+
+
+                    acct_dir_img2 = acct_dir_img + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_img2):
+                        os.makedirs(acct_dir_img2)
+                    imgFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__IMG_'+etoDateStr+'.png'
+                    infoJsonFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__INFO_'+etoDateStr+'.json'
+
+                    acct_dir_pkl2 = acct_dir_pkl + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_pkl2):
+                        os.makedirs(acct_dir_pkl2)
+                    pklFile = acct_dir_pkl2 + acctName+'_'+fieldassetid+'__PKL_'+etoDateStr+'.pkl'
+
+
+                    imgDict = {
+                        'ImgFileName': os.path.split(imgFile)[1],
+                        'ImgDate': imgDtStr,
+                        'ImgType': 'ETc',
+                        'ImgExtent': ndvi_ext, 
+                        'ImgBoundary': P.to_wkt(),
+                        'AssetID': row.fieldassetid,
+                        'CustomerID':a.split('_')[1],
+                        'Ranch': ranch,
+                        'Field': field
+                    }
+                    with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                        json.dump(imgDict, outfile, ensure_ascii=False)
+
+                    plt.ioff();
+                    with open(imgFile, 'wb') as outfile:
+                        fig = plt.figure()
+                        plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                        fig.gca().set_axis_off()
+                        plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                        plt.close();
+
+                    with open(pklFile,'wb') as f:
+                        pickle.dump(ndvi_img, f)
+
+                    retdf = ndvi_df.loc[0]
+                    ndvi_mean = retdf.Mean
+                    ndvi_p90 = retdf.p90
+                    ndvi_p25 = retdf.p25
+                    ndvi_p75 = retdf.p75
+                    ndvi_median = retdf.Median
+                    ndvi_std = retdf.StdDev
+
+                else:
+                    #set values if NaN
+                    ndvi_mean = np.nan
+                    ndvi_p90 = np.nan
+                    ndvi_p25 = np.nan
+                    ndvi_p75 = np.nan
+                    ndvi_median = np.nan
+                    ndvi_std = np.nan
+
+                #print(['NDVI_mean = '+str(ndvi_mean)])
+                #derived
+                ndvi_unif = (ndvi_p25 / ndvi_median)*100
+
+                #compute the METRIC ETc
+                if 'Tavg' in row.index.tolist():
+                    et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+                else:
+                    et_metric=0.0
+
+                ##########if et_metric is NaN, make it zero
+                if (np.isnan(et_metric)):
+                    et_metric=0.0
+
+                #print('ETc metric='+str(et_metric))
+                #the Kc
+                fac = 1.35 #somewhat arbitrary for now
+                k_c = 1.3558*ndvi_mean*fac + 0.05
+                k_c2 = 1.3558*ndvi_mean + 0.05
+
+                #compute the ETc
+                et_ndvi = eto*k_c
+                et_ndvi2 = eto*k_c2
+
+                #get the final ETc
+                # Include et_metric
+                k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+
+                k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                et_p90 = eto*k_c_p90
+
+                #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+                acctGDF_date.loc[i,'ETc']=et_c
+                acctGDF_date.loc[i,'ETc_low']=et_c2
+                acctGDF_date.loc[i,'Kc']=k_c
+                acctGDF_date.loc[i,'ETm']=et_metric
+                acctGDF_date.loc[i,'ET_p90']=et_p90
+                acctGDF_date.loc[i,'ET_p25']=ndvi_p25
+                acctGDF_date.loc[i,'ET_p75']=ndvi_p75
+                acctGDF_date.loc[i,'ET_median']=ndvi_median
+                acctGDF_date.loc[i,'ET_StdDev']=ndvi_std
+                acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                if 'Tavg' in row.index.tolist():
+                    acctGDF_date.loc[i,'Precipitation(in)']=precip
+                    acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                    acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                    acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                    acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                    acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                    acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                    acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+
+
+            acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+            acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+            acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+            acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+
+            #print(type(acctGDF_date))
+            print(acctGDF_date.ETc.tolist())
+
+            #save the values
+            #acctGDF_date = acctGDF_date.astype('str')
+            #print(jsonFile)
+            acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        print("\tEND --- %s seconds ---" % (time.time() - starta))
+        print('\tDone!')
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+"""
+def generate_AUS_ETc(merged_df):
+
+    unique_accounts = pd.unique(merged_df.customerid)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = 'JainlogicCustomerid_'+str(acct)
+        #try:
+        starta = time.time()
+
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.replace(' ','').upper()
+        acct_dir = acctOutputPath + a + '/data/'
+        acct_dir_img = acctOutputPath + a + '/img/'
+        acct_dir_pkl = acctOutputPath + a + '/pkl/'
+        acct_dir_rep = acctOutputPath + a + '/reports/'
+
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+        if not os.path.exists(acct_dir_img):
+            os.makedirs(acct_dir_img)
+        if not os.path.exists(acct_dir_pkl):
+            os.makedirs(acct_dir_pkl)
+        if not os.path.exists(acct_dir_rep):
+            os.makedirs(acct_dir_rep)
+
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.Category == a]
+
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+
+        #for every day, do the following analysis and printout
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+
+        #print(unique_dts)
+
+        for dt in unique_dts:
+
+            endDay = dt        
+
+            startd = time.time()
+            #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+            etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+            jsonFile = acct_dir + acctName+'__ET_'+etoDateStr+'.json'
+
+            acctGDF_date = acctGDF[acctGDF.Date==dt]
+            acctGDF_date.reset_index(drop=True, inplace=True)
+
+            print('\t\t'+etoDateStr)
+            for i,row in acctGDF_date.iterrows():
+
+                customerid = str(row.customerid)
+                acct = row.Category
+                ranch = row.SubCategory
+                field = row.Name
+                fieldassetid = 'ASSETID_'+str(row.fieldassetid)
+
+                #ETo and weather values
+                eto = row['ETo(in)']
+                tavg = row['Tavg']
+                #rnet = row['Rnet']
+                wavg = row['Wavg']
+                ############## add others Raw and Deried
+                precip = row['Precip_in']
+                maxAirTemp = row['T_max']
+                minAirTemp = row['T_min']
+                avgAirTemp = row['T_mean']
+                maxRelHumPercent = row['RH_max']
+                minRelHumPercent = row['RH_min']
+                avgRelHumPercent = row['RH_mean']
+                dewPoint = row['T_dew']
+
+                #########################################
+
+                # NDVI value
+                P = getSinglePoly(row.geometry)
+
+
+                ss = row.SentinelFootprint
+                ll = row.LandsatFootprint
+
+                #do Sentinel
+                if not type(ss)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        S = [ss.replace('[','').replace(']','').replace('\'','')]
+                    else:
+                        tok = ss.split(',')
+                        l = len(tok)
+                        S=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            S.append(tk)
+                else:
+                    S = ss
+                if (type(S)==str):
+                    S = [S]
+
+                #do landsat
+                if not type(ll)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        L = ll.replace('[','').replace(']','').replace('\'','')
+                    else:
+                        tok = ll.split(', ')
+                        l = len(tok)
+                        L=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            L.append(tk.replace(' ',''))
+                else:
+                    L = [str(x).zfill(6) for x in ll]
+
+                if (type(L)==str):
+                    L = [L]
+
+                ndvi_mList_df = pd.DataFrame()
+
+                NDVIFiles_df = getNDVIFilesWithDate(32, S, L, etoDateStr)
+                NDVIFiles_df.reset_index(drop=True,inplace=True)
+                #print(NDVIFiles_df)
+
+                [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3(NDVIFiles_df,P)
+
+
+                if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                    ext = json.loads(ndvi_ext)
+                    ndvi_mList_df = ndvi_df.copy()
+
+
+                    acct_dir_img2 = acct_dir_img + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_img2):
+                        os.makedirs(acct_dir_img2)
+                    imgFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__IMG_'+etoDateStr+'.png'
+                    infoJsonFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__INFO_'+etoDateStr+'.json'
+
+                    acct_dir_pkl2 = acct_dir_pkl + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_pkl2):
+                        os.makedirs(acct_dir_pkl2)
+                    pklFile = acct_dir_pkl2 + acctName+'_'+fieldassetid+'__PKL_'+etoDateStr+'.pkl'
+
+
+                    imgDict = {
+                        'ImgFileName': os.path.split(imgFile)[1],
+                        'ImgDate': imgDtStr,
+                        'ImgType': 'NDVI',
+                        'ImgExtent': ndvi_ext, 
+                        'ImgBoundary': P.to_wkt(),
+                        'AssetID': row.fieldassetid,
+                        'CustomerID': row.customerid,
+                        'Ranch': ranch,
+                        'Field': field
+                    }
+                    with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                        json.dump(imgDict, outfile, ensure_ascii=False)
+
+                    plt.ioff();
+                    with open(imgFile, 'wb') as outfile:
+                        fig = plt.figure()
+                        plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                        fig.gca().set_axis_off()
+                        plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                        plt.close();
+
+                    with open(pklFile,'wb') as f:
+                        pickle.dump(ndvi_img, f)
+
+                    retdf = ndvi_df.loc[0]
+
+                    ndvi_mean = retdf.Mean
+                    ndvi_p90 = retdf.p90
+                    ndvi_p25 = retdf.p25
+                    ndvi_p75 = retdf.p75
+                    ndvi_median = retdf.Median
+                    ndvi_std = retdf.StdDev
+
+                else:
+                    #set values if NaN
+                    ndvi_mean = np.nan
+                    ndvi_p90 = np.nan
+                    ndvi_p25 = np.nan
+                    ndvi_p75 = np.nan
+                    ndvi_median = np.nan
+                    ndvi_std = np.nan
+
+
+                #derived
+                ndvi_unif = (ndvi_p25 / ndvi_median)*100
+
+                #compute the METRIC ETc
+                et_metric = 0.0 #Don't compute METRIC ET due to no rnet
+                #computeMetricET(tavg,rnet,wavg,ndvi_mean)
+
+                ##########if et_metric is NaN, make it zero
+                if (np.isnan(et_metric)):
+                    et_metric=0.0
+
+                #the Kc
+                fac = 1.35 #somewhat arbitrary for now
+                k_c = 1.3558*ndvi_mean*fac + 0.05
+                k_c2 = 1.3558*ndvi_mean + 0.05
+
+                #compute the ETc
+                et_ndvi = eto*k_c
+                et_ndvi2 = eto*k_c2
+
+                #get the final ETc
+                # Include et_metric
+                k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+
+                k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                et_p90 = eto*k_c_p90
+
+                acctGDF_date.loc[i,'ETc']=et_c
+                acctGDF_date.loc[i,'ETc_low']=et_c2
+                acctGDF_date.loc[i,'Kc']=k_c
+                acctGDF_date.loc[i,'ETm']=et_metric
+                acctGDF_date.loc[i,'ET_p90']=et_p90
+                acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                acctGDF_date.loc[i,'Precipitation(in)']=precip
+                acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+
+
+            acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+            #acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+            acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+            if 'CentroidPoint' in acctGDF_date.columns:
+                acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+            print(acctGDF_date.ETc.tolist())
+
+            #save the values
+            acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        print("\tEND --- %s seconds ---" % (time.time() - starta))
+        print('\tDone!')
+        #except:
+            #print('Exception in Acct: '+str(Exception))
+            #continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+"""
+
+def generateETc_NOAA3_noscreen(merged_df):
+
+    unique_accounts = pd.unique(merged_df.customerid)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = 'JainlogicCustomerid_'+str(acct)
+        #try:
+        starta = time.time()
+        
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = acctOutputPath + a + '/data/'
+        acct_dir_img = acctOutputPath + a + '/img/'
+        acct_dir_pkl = acctOutputPath + a + '/pkl/'
+        acct_dir_rep = acctOutputPath + a + '/reports/'
+            
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+        if not os.path.exists(acct_dir_img):
+            os.makedirs(acct_dir_img)
+        if not os.path.exists(acct_dir_pkl):
+            os.makedirs(acct_dir_pkl)
+        if not os.path.exists(acct_dir_rep):
+            os.makedirs(acct_dir_rep)
+            
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.customerid == acct]
+        
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+        
+        #for every day, do the following analysis and printout
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+        for dt in unique_dts:
+            
+            endDay = dt        
+            
+            startd = time.time()
+            #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+            etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+            jsonFile = acct_dir + acctName+'__ET_'+etoDateStr+'.json'
+            
+            acctGDF_date = acctGDF[acctGDF.Date==dt]
+            acctGDF_date.reset_index(drop=True, inplace=True)
+            
+            print('\t\t'+etoDateStr)
+            #print(acctGDF_date.columns)
+            for i,row in acctGDF_date.iterrows():
+
+                customerid = str(row.customerid)
+                acct = row.Category
+                ranch = row.SubCategory
+                field = row.Name
+                fieldassetid = 'ASSETID_'+str(row.fieldassetid)
+
+                #ETo and weather values
+                #print('row: '+str(row))
+                if 'Tavg' in row.index.tolist():
+                    eto = row['ETo(in)']
+                    tavg = row['Tavg']
+                    rnet = row['Rnet']
+                    wavg = row['Wavg']
+                    ############## add others Raw and Deried
+                    precip = row['Precipitation(in)']
+                    maxAirTemp = row['MaximumAirTemperature(F)']
+                    minAirTemp = row['MinimumAirTemperature(F)']
+                    avgAirTemp = row['AverageAirTemperature(F)']
+                    maxRelHumPercent = row['MaximumRelativeHumidity(%)']
+                    minRelHumPercent = row['MinimumRelativeHumidity(%)']
+                    avgRelHumPercent = row['AverageRelativeHumidity(%)']
+                    dewPoint = row['DewPoint(F)']
+                else:
+                    eto = row['ETo(in)']
+
+                #########################################
+
+                P = getSinglePoly(row.geometry)
+
+
+                ss = row.SentinelFootprint
+                ll = row.LandsatFootprint
+
+                #do Sentinel
+                if not type(ss)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        S = [ss.replace('[','').replace(']','').replace('\'','')]
+                    else:
+                        tok = ss.split(',')
+                        l = len(tok)
+                        S=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            S.append(tk)
+                else:
+                    S = ss
+                if (type(S)==str):
+                    S = [S]
+
+                #do landsat
+                if not type(ll)==list:
+                    if (ss.find(',')==-1): #There is only ONE tile
+                        L = ll.replace('[','').replace(']','').replace('\'','')
+                    else:
+                        tok = ll.split(', ')
+                        l = len(tok)
+                        L=[]
+                        for ii in range(l):
+                            tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                            L.append(tk.replace(' ',''))
+                else:
+                    L = [str(x).zfill(6) for x in ll]
+
+                if (type(L)==str):
+                    L = [L]
+
+
+                #print([S,L,etoDateStr])
+
+                ndvi_mList_df = pd.DataFrame()
+
+                NDVIFiles_df = getNDVIFilesWithDate(62, S, L, etoDateStr)
+                NDVIFiles_df.reset_index(drop=True,inplace=True)
+
+                #print(NDVIFiles_df)
+
+                [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3_noscreen(NDVIFiles_df,P)
+
+                #print([ndvi_df,ndvi_ext,imgDtStr])
+
+                if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                    ext = json.loads(ndvi_ext)
+                    ndvi_mList_df = ndvi_df.copy()
+                    
+                    
+                    acct_dir_img2 = acct_dir_img + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_img2):
+                        os.makedirs(acct_dir_img2)
+                    imgFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__IMG_'+etoDateStr+'.png'
+                    infoJsonFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__INFO_'+etoDateStr+'.json'
+
+                    acct_dir_pkl2 = acct_dir_pkl + fieldassetid + '/'
+                    if not os.path.exists(acct_dir_pkl2):
+                        os.makedirs(acct_dir_pkl2)
+                    pklFile = acct_dir_pkl2 + acctName+'_'+fieldassetid+'__PKL_'+etoDateStr+'.pkl'
+                    
+                
+                    imgDict = {
+                        'ImgFileName': os.path.split(imgFile)[1],
+                        'ImgDate': imgDtStr,
+                        'ImgType': 'ETc',
+                        'ImgExtent': ndvi_ext, 
+                        'ImgBoundary': P.to_wkt(),
+                        'AssetID': row.fieldassetid,
+                        'CustomerID':a.split('_')[1],
+                        'Ranch': ranch,
+                        'Field': field
+                    }
+                    with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                        json.dump(imgDict, outfile, ensure_ascii=False)
+
+                    plt.ioff();
+                    with open(imgFile, 'wb') as outfile:
+                        fig = plt.figure()
+                        plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                        fig.gca().set_axis_off()
+                        plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                        plt.close();
+
+                    with open(pklFile,'wb') as f:
+                        pickle.dump(ndvi_img, f)
+
+                    retdf = ndvi_df.loc[0]
+                    ndvi_mean = retdf.Mean
+                    ndvi_p90 = retdf.p90
+                    ndvi_p25 = retdf.p25
+                    ndvi_p75 = retdf.p75
+                    ndvi_median = retdf.Median
+                    ndvi_std = retdf.StdDev
+
+                else:
+                    #set values if NaN
+                    ndvi_mean = np.nan
+                    ndvi_p90 = np.nan
+                    ndvi_p25 = np.nan
+                    ndvi_p75 = np.nan
+                    ndvi_median = np.nan
+                    ndvi_std = np.nan
+
+                #print(['NDVI_mean = '+str(ndvi_mean)])
+                #derived
+                ndvi_unif = (ndvi_p25 / ndvi_median)*100
+
+                #compute the METRIC ETc
+                if 'Tavg' in row.index.tolist():
+                    et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+                else:
+                    et_metric=0.0
+
+                ##########if et_metric is NaN, make it zero
+                if (np.isnan(et_metric)):
+                    et_metric=0.0
+
+                #print('ETc metric='+str(et_metric))
+                #the Kc
+                fac = 1.35 #somewhat arbitrary for now
+                k_c = 1.3558*ndvi_mean*fac + 0.05
+                k_c2 = 1.3558*ndvi_mean + 0.05
+
+                #compute the ETc
+                et_ndvi = eto*k_c
+                et_ndvi2 = eto*k_c2
+
+                #get the final ETc
+                # Include et_metric
+                k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+                et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+                et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+
+                k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+                et_p90 = eto*k_c_p90
+
+                #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+                acctGDF_date.loc[i,'ETc']=et_c
+                acctGDF_date.loc[i,'ETc_low']=et_c2
+                acctGDF_date.loc[i,'Kc']=k_c
+                acctGDF_date.loc[i,'ETm']=et_metric
+                acctGDF_date.loc[i,'ET_p90']=et_p90
+                acctGDF_date.loc[i,'ET_p25']=ndvi_p25
+                acctGDF_date.loc[i,'ET_p75']=ndvi_p75
+                acctGDF_date.loc[i,'ET_median']=ndvi_median
+                acctGDF_date.loc[i,'ET_StdDev']=ndvi_std
+                acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+                if 'Tavg' in row.index.tolist():
+                    acctGDF_date.loc[i,'Precipitation(in)']=precip
+                    acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+                    acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+                    acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+                    acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+                    acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+                    acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+                    acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+
+
+            acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+            acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+            acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+            acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+
+            #print(type(acctGDF_date))
+            print(acctGDF_date.ETc.tolist())
+
+            #save the values
+            #acctGDF_date = acctGDF_date.astype('str')
+            #print(jsonFile)
+            acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        print("\tEND --- %s seconds ---" % (time.time() - starta))
+        print('\tDone!')
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+def multiprocessing_etc_noaa(merged_df, dt):
+    time.sleep(2)
+    dt_new = dt.astype('M8[D]').astype('O')
+    generate_MP_ETc_NOAA(merged_df,dt_new)
+    return
+
+def generate_MP_ETc_NOAA(merged_df,dt):
+
+    unique_accounts = pd.unique(merged_df.customerid)
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start MP ETc--- %s  ---" % datetime.now())
+
+    for acct in unique_accounts:
+        a = 'JainlogicCustomerid_'+str(acct)
+        #try:
+        starta = time.time()
+        
+        print('\n\tWriting MP ETc...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = acctOutputPath + a + '/data/'
+        acct_dir_img = acctOutputPath + a + '/img/'
+        acct_dir_pkl = acctOutputPath + a + '/pkl/'
+        acct_dir_rep = acctOutputPath + a + '/reports/'
+            
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+        if not os.path.exists(acct_dir_img):
+            os.makedirs(acct_dir_img)
+        if not os.path.exists(acct_dir_pkl):
+            os.makedirs(acct_dir_pkl)
+        if not os.path.exists(acct_dir_rep):
+            os.makedirs(acct_dir_rep)
+            
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.customerid == acct]
+        
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+        
+        #for every day, do the following analysis and printout
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+        
+        #for dt in unique_dts:
+            
+        endDay = dt        
+        
+        startd = time.time()
+        #print("\n\t\tSTART --- %s  ---" % datetime.now())
+
+        etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+        jsonFile = acct_dir + acctName+'__ET_'+etoDateStr+'.json'
+        
+        acctGDF_date = acctGDF[acctGDF.Date==dt]
+        acctGDF_date.reset_index(drop=True, inplace=True)
+        
+        print('\t\t'+etoDateStr)
+        #print(acctGDF_date.columns)
+        for i,row in acctGDF_date.iterrows():
+
+            customerid = str(row.customerid)
+            acct = row.Category
+            ranch = row.SubCategory
+            field = row.Name
+            fieldassetid = 'ASSETID_'+str(row.fieldassetid)
+            
+            #ETo and weather values
+            #print('row: '+str(row))
+
+            eto = row['ETo(in)']
+            tavg = row['Tavg']
+            rnet = row['Rnet']
+            wavg = row['Wavg']
+            ############## add others Raw and Deried
+            precip = row['Precipitation(in)']
+            maxAirTemp = row['MaximumAirTemperature(F)']
+            minAirTemp = row['MinimumAirTemperature(F)']
+            avgAirTemp = row['AverageAirTemperature(F)']
+            maxRelHumPercent = row['MaximumRelativeHumidity(%)']
+            minRelHumPercent = row['MinimumRelativeHumidity(%)']
+            avgRelHumPercent = row['AverageRelativeHumidity(%)']
+            dewPoint = row['DewPoint(F)']
+            
+            #########################################
+        
+            # NDVI value
+            P = getSinglePoly(row.geometry)
+
+            
+            ss = row.SentinelFootprint
+            ll = row.LandsatFootprint
+            
+            #do Sentinel
+            if not type(ss)==list:
+                if (ss.find(',')==-1): #There is only ONE tile
+                    S = [ss.replace('[','').replace(']','').replace('\'','')]
+                else:
+                    tok = ss.split(',')
+                    l = len(tok)
+                    S=[]
+                    for ii in range(l):
+                        tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                        S.append(tk)
+            else:
+                S = ss
+            if (type(S)==str):
+                S = [S]
+        
+            #do landsat
+            if not type(ll)==list:
+                if (ss.find(',')==-1): #There is only ONE tile
+                    L = ll.replace('[','').replace(']','').replace('\'','')
+                else:
+                    tok = ll.split(', ')
+                    l = len(tok)
+                    L=[]
+                    for ii in range(l):
+                        tk = tok[ii].replace('[','').replace(']','').replace('\'','')
+                        L.append(tk.replace(' ',''))
+            else:
+                L = [str(x).zfill(6) for x in ll]
+
+            if (type(L)==str):
+                L = [L]
+            
+
+            #print([S,L,etoDateStr])
+
+            ndvi_mList_df = pd.DataFrame()
+            
+            NDVIFiles_df = getNDVIFilesWithDate(32, S, L, etoDateStr)
+            NDVIFiles_df.reset_index(drop=True,inplace=True)
+
+            #print(NDVIFiles_df)
+            
+            [ndvi_df,ndvi_img,ndvi_ext,imgDtStr] = getNDVIValueWithStatsAndImg3(NDVIFiles_df,P)
+            
+            #print([ndvi_df,ndvi_ext,imgDtStr])
+            
+            if (len(ndvi_df)>0 & (len(ndvi_img)>0)): #The first time the df has valid values
+                ext = json.loads(ndvi_ext)
+                ndvi_mList_df = ndvi_df.copy()
+                
+                
+                acct_dir_img2 = acct_dir_img + fieldassetid + '/'
+                if not os.path.exists(acct_dir_img2):
+                    os.makedirs(acct_dir_img2)
+                imgFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__IMG_'+etoDateStr+'.png'
+                infoJsonFile = acct_dir_img2 + acctName+'_'+fieldassetid+'__INFO_'+etoDateStr+'.json'
+
+                acct_dir_pkl2 = acct_dir_pkl + fieldassetid + '/'
+                if not os.path.exists(acct_dir_pkl2):
+                    os.makedirs(acct_dir_pkl2)
+                pklFile = acct_dir_pkl2 + acctName+'_'+fieldassetid+'__PKL_'+etoDateStr+'.pkl'
+                
+            
+                imgDict = {
+                    'ImgFileName': os.path.split(imgFile)[1],
+                    'ImgDate': imgDtStr,
+                    'ImgType': 'ETc',
+                    'ImgExtent': ndvi_ext, 
+                    'ImgBoundary': P.to_wkt(),
+                    'AssetID': row.fieldassetid,
+                    'CustomerID':a.split('_')[1],
+                    'Ranch': ranch,
+                    'Field': field
+                }
+                with open(infoJsonFile, 'w', encoding='utf8') as outfile:
+                    json.dump(imgDict, outfile, ensure_ascii=False)
+
+                plt.ioff();
+                with open(imgFile, 'wb') as outfile:
+                    fig = plt.figure()
+                    plt.imshow(ndvi_img, extent=ext, cmap=zoom1, vmin=0, vmax=1)
+                    fig.gca().set_axis_off()
+                    plt.savefig(outfile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+                    plt.close();
+                    
+                with open(pklFile,'wb') as f:
+                    pickle.dump(ndvi_img, f)
+            
+                retdf = ndvi_df.loc[0]
+                ndvi_mean = retdf.Mean
+                ndvi_p90 = retdf.p90
+                ndvi_p25 = retdf.p25
+                ndvi_p75 = retdf.p75
+                ndvi_median = retdf.Median
+                ndvi_std = retdf.StdDev
+                
+            else:
+                #set values if NaN
+                ndvi_mean = np.nan
+                ndvi_p90 = np.nan
+                ndvi_p25 = np.nan
+                ndvi_p75 = np.nan
+                ndvi_median = np.nan
+                ndvi_std = np.nan
+                
+            #print(['NDVI_mean = '+str(ndvi_mean)])
+            #derived
+            ndvi_unif = (ndvi_p25 / ndvi_median)*100
+        
+            #compute the METRIC ETc
+            #print('Metric inputs:')
+            #print([tavg,rnet,wavg,ndvi_mean])
+            et_metric = computeMetricET(tavg,rnet,wavg,ndvi_mean)
+            
+            ##########if et_metric is NaN, make it zero
+            if (np.isnan(et_metric)):
+                et_metric=0.0
+
+            #print('ETc metric='+str(et_metric))
+            #the Kc
+            fac = 1.35 #somewhat arbitrary for now
+            k_c = 1.3558*ndvi_mean*fac + 0.05
+            k_c2 = 1.3558*ndvi_mean + 0.05
+        
+            #compute the ETc
+            et_ndvi = eto*k_c
+            et_ndvi2 = eto*k_c2
+        
+            #get the final ETc
+            # Include et_metric
+            k_a = 1 #We can reduce k_a to increase the effect of Metric (see above)
+            et_c =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi)
+            et_c2 =  (1.15 - k_a)*et_metric + ((k_a + 0.0)*et_ndvi2)
+            
+            k_c_p90 = ((1.3558*ndvi_p90*fac + 0.05) + (1.3558*ndvi_p90 + 0.05))/2
+            et_p90 = eto*k_c_p90
+            
+            #print([eto,k_c,k_c2,et_metric,et_c, et_c2, et_p90,ndvi_unif,precip])
+
+            acctGDF_date.loc[i,'ETc']=et_c
+            acctGDF_date.loc[i,'ETc_low']=et_c2
+            acctGDF_date.loc[i,'Kc']=k_c
+            acctGDF_date.loc[i,'ETm']=et_metric
+            acctGDF_date.loc[i,'ET_p90']=et_p90
+            acctGDF_date.loc[i,'ET_unif']=ndvi_unif
+            acctGDF_date.loc[i,'Precipitation(in)']=precip
+            acctGDF_date.loc[i,'MaximumAirTemperature(F)']=maxAirTemp
+            acctGDF_date.loc[i,'MinimumAirTemperature(F)']=minAirTemp
+            acctGDF_date.loc[i,'AverageAirTemperature(F)']=avgAirTemp
+            acctGDF_date.loc[i,'MaximumRelativeHumidity(%)']=maxRelHumPercent
+            acctGDF_date.loc[i,'MinimumRelativeHumidity(%)']=minRelHumPercent
+            acctGDF_date.loc[i,'AverageRelativeHumidity(%)']=avgRelHumPercent
+            acctGDF_date.loc[i,'DewPoint(F)']=dewPoint
+            
+
+        acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+        acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+        acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+        acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+        print(acctGDF_date.ETc.tolist())
+        
+        #save the values
+        acctGDF_date.to_file(jsonFile, driver="GeoJSON")
+
+        #print("\tEND --- %s seconds ---" % (time.time() - starta))
+        #print('\tDone!')
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+def downloadNewSentinelTiles(newSentinelTileList, N):
+    #make directories if there aren't any
+
+    init_list_tiles = newSentinelTileList
+    #Create directories if not there
+    for tile in init_list_tiles:
+        rawTilePath = sentinelRawFolder + tile
+        procTilePath = sentinelProcFolder + tile
+        if not os.path.exists(rawTilePath):
+            os.mkdir(rawTilePath)
+        if not os.path.exists(procTilePath):
+            os.mkdir(procTilePath)
+
+    #Set the dates (LATER) from parameters
+    yrStr = datetime.strftime(datetime.now(),'%Y')
+
+    endDt = datetime.now() - timedelta(days=2)
+    startDt = endDt - timedelta(days=int(N))
+
+    list_of_ts = pd.date_range(startDt, endDt, freq='m')
+    list_of_dates = [datetime.strptime(datetime.strftime(x,'%Y-%m-%d'), '%Y-%m-%d') for x in list_of_ts]
+    for dt in list_of_dates:
+        startDt = dt
+        endDt = startDt + timedelta(days=30)
+
+        ################ Run the numbers
+        startDtStr = datetime.strftime(startDt, '%Y-%m-%d')
+        endDtStr = datetime.strftime(endDt, '%Y-%m-%d')
+        print('\nDownload Horizon from '+startDtStr+' to '+endDtStr)
+
+        #Setup the query
+        api = SentinelAPI('sumer_johal2019', 'AgraLogics!2019', 'https://scihub.copernicus.eu/dhus')
+        #DISCARD tiles with more than 20% Cloud Cover
+        query_kwargs = {
+            'platformname': 'Sentinel-2',
+            'producttype': 'S2MSI2A',
+            'cloudcoverpercentage': (0, 75) #ignore if Cloud Cover > 75%
+        }
+
+        for tile in init_list_tiles: 
+            try:
+                print('\n\nProcessing Tile: '+tile)
+                products = OrderedDict()
+                kw = query_kwargs.copy()
+                kw['date'] = (startDt, endDt)
+                pp = api.query(getTileWkt(tile),**kw)
+                products.update(pp)
+                download_path = sentinelRawFolder + tile + '/' 
+                pdf = pd.DataFrame(products).T
+                pdf.reset_index(inplace=True)
+                pdf['TILE'] = pdf.title.apply(lambda x: x.split('_')[5][-5:])    
+                pdf = pdf[pdf.TILE==tile]
+                pdf.set_index('index',drop=True, inplace=True)
+                pdf.drop('TILE',inplace=True, axis=1)
+                del pdf.index.name
+                products_filtered = pdf.to_dict(into=OrderedDict, orient='index')
+
+                #1. Download the Raw Data for the tile
+                api.download_all(products_filtered, directory_path=download_path)
+
+                #2. Save info to a pandas dataframe
+                pdf = api.to_dataframe(products_filtered)
+
+                #Now unzip
+                for i,j in pdf.iterrows(): 
+                    productID = pdf.identifier[i]
+                    f = pdf.filename[i]
+
+                    #3. Unzip the file
+                    zipFile = download_path + pdf.title[i]
+                    zf = zipFile + '.zip'
+                    print("\n*******************\nExtracting file ...",zf)
+                    with ZipFile(zf, 'r') as zipObj:
+                        #Extract all the contents of zip file in current directory
+                        zipObj.extractall(path = download_path)
+                    print('...' + 'Done.')  
+
+                    #4. Now delete the zip file
+                    print('Deleting Zip file ...' + zf)
+                    os.remove(zf)
+                    print('...' + 'Done!')
+
+
+                    ############ CHECK TO SEE IF THE FOOTPRINT IS VALID/BIG ENOUGH
+                    footprint_path = download_path + f + '/'       
+                    footprint_file = footprint_path + 'MTD_MSIL2A.xml'
+
+                    fp = getFootprint(footprint_file)
+                    area_footprint, coverageFraction = getAreaOfROI(fp)
+
+                    if coverageFraction >= 0.25: #at least 25% the raster is there
+                        print('\nCoverage is >= 25%: Coverage%= ' + str(coverageFraction*100))
+                        #5. Convert to GEOTIFF & process for CC
+                        tiffFile_path = download_path.replace("/RAW", "/PROCESSED")
+                        #construct the entire path
+                        dir_1 = download_path + f + '/GRANULE/'
+                        d1 = os.listdir(dir_1)
+
+                        gmlPath = dir_1 + d1[0] + '/QI_DATA/'
+
+                        dir_2 = dir_1 + d1[0] + '/IMG_DATA/R10m/'
+                        bands = os.listdir(dir_2)
+
+                        #sort the list
+                        bands.sort()
+                        imagePath = dir_2
+
+                        gmlPath = dir_1 + d1[0] + '/QI_DATA/'
+                        gmlFile = 'MSK_CLDPRB_20m.jp2'
+                        cloudMask = getCloudMask(gmlPath,gmlFile)
+
+
+                        band2_src = rasterio.open(imagePath+bands[1], driver='JP2OpenJPEG')
+                        blue = band2_src.read(1) * cloudMask #blue
+
+                        band3_src = rasterio.open(imagePath+bands[2], driver='JP2OpenJPEG')
+                        green = band3_src.read(1) * cloudMask #green
+
+                        band4_src = rasterio.open(imagePath+bands[3], driver='JP2OpenJPEG')
+                        red = band4_src.read(1) * cloudMask #red
+
+                        band8_src = rasterio.open(imagePath+bands[4], driver='JP2OpenJPEG')
+                        nir = band8_src.read(1) * cloudMask #nir
+                        band8_src.close()
+
+                        out_meta = band2_src.meta.copy()
+                        epsg_code = int(band2_src.crs.data['init'][5:])
+
+                        #Derived bands
+                        ndvi = ((nir - red) / (nir + red))
+                        ndvi_scaled = ndvi*255
+                        ndvi_uint16 = ndvi_scaled.astype(np.uint16)
+
+                        gndvi = ((nir - green) / (nir + green))
+                        gndvi_scaled = gndvi*255
+                        gndvi_uint16 = gndvi_scaled.astype(np.uint16)
+
+                        vari = ((green - red) / (green + red - blue))
+                        vari_scaled = vari*255
+                        vari_uint16 = vari_scaled.astype(np.uint16)
+
+                        savi = ((nir - red) / (nir + red + 0.5)) * 1.5
+                        savi_scaled = savi*255
+                        savi_uint16 = savi_scaled.astype(np.uint16)
+
+                        evi = 2.5 * ((nir - red) / (nir + 6*red - 7.5*blue + 1))
+                        evi_scaled = evi*255
+                        evi_uint16 = evi_scaled.astype(np.uint16)
+
+
+
+
+
+                        pcoverPercent = (np.count_nonzero(~np.isnan(ndvi)) / np.count_nonzero(~np.isnan(band2_src.read(1))))*100
+                        pcPercent = str('{0:.2f}%'.format(pcoverPercent))
+
+                        band2_src.close()
+                        band3_src.close()
+                        band4_src.close()
+                        band8_src.close()
+
+                        print('**********DATE: '+str(date.today())+', Percent CloudThrough:'+pcPercent)
+
+                        #write the NDVI to a Geotiff for that scene
+                        tifname = tiffFile_path + f.replace(".SAFE","") + '_NDVI_WGS84.tiff'    
+                        print('Writing TIFF file: ' + tifname)
+                        ndviTIFF = rasterio.open(tifname,'w',driver='Gtiff',
+                                         width=band4_src.width, height=band4_src.height,
+                                         count=1,
+                                         crs=band4_src.crs,
+                                         transform=band4_src.transform,
+                                         dtype=band4_src.dtypes[0]
+                                         )       
+                        ndviTIFF.write(ndvi_uint16,1) #NDVI
+                        ndviTIFF.close()
+
+                        print('...Done!\n*******************\n\n')
+
+                    else:
+                        print('Coverage is < 25%: Coverage%= ' + str(coverageFraction*100))
+                        #Delete the raw files
+                        rmFolderName = download_path + f
+                        print('Deleting .SAFE file folder ...' + f)
+                        try:
+                            shutil.rmtree(rmFolderName)
+                        except OSError as e:
+                            print ("Error: %s - %s." % (e.filename, e.strerror))
+                        print('...' + 'Done!')
+            except:
+                print('Exception for tile: '+tile)
+                continue
+
+    return
+
+def getUniqueSentinelTiles2(gdf_acct):
+    list_of_sentinel_tiles = []
+    sentinel_tiles = []
+    for i,row in gdf_acct.iterrows():
+        tileList = []
+        fp = row.SentinelFootprint
+
+        if type(fp)==list:
+            sentinel_tiles =  sentinel_tiles + fp
+        elif type(fp)==str:
+            toks = fp.split(',')
+            for i in range(len(toks)):
+                tileList.append(str(toks[i]))
+            sentinel_tiles =  sentinel_tiles + tileList
+
+    list_of_sentinel_tiles =  list(set(sentinel_tiles))
+    list_of_sentinel_tiles.sort()
+
+    return list_of_sentinel_tiles
+
+
+def getUniqueSentinelTiles(gdf_acct):
+    list_of_sentinel_tiles = []
+    sentinel_tiles = []
+    for i,row in gdf_acct.iterrows():
+        tileList = []
+        fp = row.SentinelFootprint
+
+        if type(fp)==list:
+            tileList + fp
+        elif type(fp)==str:
+            toks = fp.split(',')
+            for i in range(len(toks)):
+                tileList.append(str(toks[i]))
+            
+        sentinel_tiles =  sentinel_tiles + tileList
+
+    list_of_sentinel_tiles =  list(set(sentinel_tiles))
+    list_of_sentinel_tiles.sort()
+
+    """
+    sentinel_tiles = []
+    for i,row in gdf_acct.iterrows():
+        tilelist = ast.literal_eval(str(row.SentinelFootprint))
+        sentinel_tiles =  sentinel_tiles + tilelist
+
+    list_of_sentinel_tiles =  list(set(sentinel_tiles))
+    list_of_sentinel_tiles.sort()
+    """
+    return list_of_sentinel_tiles
+
+
+#Make a list of the sentinel directories that already exist
+existing_sentinel_list = [x for x in os.listdir(sentinelProcFolder)]
+existing_landsat_list = [x for x in os.listdir(landsatProcFolder)]
+
+
+
+
+def validate(email): 
+    match=re.search(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9]+\.[a-zA-Z0-9.]*\.*[com|org|edu]{3}$)",email)
+    if match:
+        return True
+    else:
+        return False
+
+
+def fitBlankETValsInDateRange(DF, TypeStr, AcctName, RanchName,FieldName, fromDtstr, toDtStr):
+    """
+    fits a linear fit to de-NaN an ETc array of values
+    """
+    gdf = DF[(DF.SubCategory==RanchName) &
+            (DF.Name==FieldName) &
+            (DF.Category==AcctName)
+           ]
+    df = pd.DataFrame(gdf)
+    #first make the Datetime searachable
+    df.Date = pd.to_datetime(df.Date)
+    
+    #Try and fit the values with the week in question
+    df = df[(df.Date >= fromDtStr) & (df.Date <= toDtStr)]
+    df['ETc_average'] = df[['ETc', 'ETc_low']].mean(axis=1)
+    ret_df = df.loc[:,['Date','ETc_average','ETc','ETc_low']]
+    ret_df.sort_values(by='Date', inplace=True)
+    ret_df.set_index('Date',inplace=True)
+    
+    if TypeStr=='ETc_low':
+        mm='ETc_low'
+    elif TypeStr=='ETc_high':
+        mm = 'ETc'
+    elif TypeStr=='ETc_mid':
+        mm='ETc_average'
+    elif TypeStr=='':
+        mm='ETc_average'
+    else:
+        mm='ETc_average'
+        
+    
+    ret_df['ETc_interp'] = ret_df[mm].interpolate(method='linear', limit_direction = 'both')
+    ret_df.ETc_interp = ret_df.ETc_interp.bfill() #back fill any trailing NaNs
+    ret_df.ETc_interp = ret_df.ETc_interp.interpolate(method='pad') #forward fill any trailing NaNs
+    
+    return ret_df
+
+def annualETBudgetForAcct(acct_gdf):
+    """
+    makes a pivot table of the monthly budget and returns the table
+    """
+    #First get last year's dates
+    curYrStr = datetime.strftime(datetime.today(),'%Y')
+    prevYrStr = str(int(curYrStr)-1)
+    
+    prevYr_StartDateStr = prevYrStr+'-01-01'
+    prevYr_StartDate = datetime.strptime(prevYr_StartDateStr,'%Y-%m-%d')
+    
+    prevYr_EndDateStr = prevYrStr+'-12-31'
+    prevYr_EndDate = datetime.strptime(prevYr_EndDateStr,'%Y-%m-%d')
+    
+    
+    tmp_df = acct_gdf.copy()
+    tmp_df.Date = pd.to_datetime(tmp_df.Date, errors='coerse')
+    tmp_df = tmp_df[(tmp_df.Date >=prevYr_StartDate) & (tmp_df.Date<=prevYr_EndDate)]
+    tmp_df['Location'] = tmp_df['SubCategory'].map(str) + ': ' + tmp_df['Name'].map(str)
+    tmp_df['ETc_average'] = tmp_df[['ETc', 'ETc_low']].mean(axis=1)
+    tmp_df.set_index([tmp_df.index, tmp_df.Date], inplace=True)
+    
+    tmpResult = pd.pivot_table(data=tmp_df, 
+                           columns=pd.Grouper(freq='M', level='Date', closed='right'), 
+                           values=["ETc_average"],
+                           index='Location', 
+                           aggfunc=np.sum,
+                          ).rename_axis(None).reset_index()
+    tmpResult.columns = tmpResult.columns.droplevel(0)
+    tmpResult.reset_index(drop=True, inplace=True)
+    colHeadingsDates=tmpResult.columns[1:].tolist()
+    colHeadingsMonth =[]
+    
+    for col in colHeadingsDates:
+        colHeadingsMonth.append(col.strftime("%b"))
+    colHeadingsPad = ['Location'] +colHeadingsMonth
+    tmpResult.columns = colHeadingsPad
+    tmpResult['Annual Total'] = tmpResult[colHeadingsMonth].sum(axis=1)
+    
+    return tmpResult
+
+
+def uniformityTrend8Week(acct_gdf):
+    #Get the uniformity trend for last 6 weeks
+    #First get last year's dates
+    curYrStr = datetime.strftime(datetime.today(),'%Y')
+    
+    currYr_StartDateStr = curYrStr+'-01-01'
+    currYr_StartDate = datetime.strptime(currYr_StartDateStr,'%Y-%m-%d')
+    
+    currYr_EndDate = datetime.strftime(datetime.today(),'%Y-%m-%d')
+    
+    
+    tmp_df = acct_gdf.copy()
+    tmp_df.Date = pd.to_datetime(tmp_df.Date, errors='coerse')
+    tmp_df = tmp_df[(tmp_df.Date >=currYr_StartDate) & (tmp_df.Date<=currYr_EndDate)]
+    tmp_df['Location'] = tmp_df['SubCategory'].map(str) + ': ' + tmp_df['Name'].map(str)
+    tmp_df.set_index([tmp_df.index, tmp_df.Date], inplace=True)
+    
+    tmpResult = pd.pivot_table(data=tmp_df, 
+                           columns=pd.Grouper(freq='W', level='Date', closed='right'), 
+                           values=["ET_unif"],
+                           index='Location', 
+                           aggfunc=np.mean,
+                          ).rename_axis(None).reset_index()
+    tmpResult.columns = tmpResult.columns.droplevel(0)
+    tmpResult.columns = ['Location'] + tmpResult.columns[1:].tolist()
+    tmpResult.reset_index(drop=True, inplace=True)
+    tmpResult = tmpResult.set_index('Location')
+
+    tr = tmpResult.iloc[:,-9:-1]
+    
+    slope = []
+    for i, row in tr.iterrows():
+        x = list(range(len(row)))
+        y = row.tolist()
+        slope.append(scipy.stats.linregress(x,y)[0])
+    
+    tr['8-Wk Average']=tr.mean(axis=1)
+    tr['4-Wk Slope']=slope
+    
+    return tr
+
+
+def waterAccounting(acct_gdf):
+    #Get the uniformity trend for last 6 weeks
+    #First get last year's dates
+    curYrStr = datetime.strftime(datetime.today(),'%Y')
+    
+    currYr_StartDateStr = curYrStr+'-01-01'
+    currYr_StartDate = datetime.strptime(currYr_StartDateStr,'%Y-%m-%d')
+    
+    currYr_EndDate = datetime.strftime(datetime.today(),'%Y-%m-%d')
+    
+    
+    tmp_df = acct_gdf.copy()
+    tmp_df.Date = pd.to_datetime(tmp_df.Date, errors='coerse')
+    tmp_df = tmp_df[(tmp_df.Date >=currYr_StartDate) & (tmp_df.Date<=currYr_EndDate)]
+    tmp_df['Location'] = tmp_df['SubCategory'].map(str) + ': ' + tmp_df['Name'].map(str)
+    tmp_df.set_index([tmp_df.index, tmp_df.Date], inplace=True)
+    
+    tmpResult = pd.pivot_table(data=tmp_df, 
+                           columns=pd.Grouper(freq='W', level='Date', closed='right'), 
+                           values=["ETc_low"],
+                           index='Location', 
+                           aggfunc=np.sum,
+                          ).rename_axis(None).reset_index()
+    tmpResult.columns = tmpResult.columns.droplevel(0)
+    tmpResult.columns = ['Location'] + tmpResult.columns[1:].tolist()
+    tmpResult.reset_index(drop=True, inplace=True)
+    tmpResult = tmpResult.set_index('Location')
+
+    tr = tmpResult.iloc[:,-9:-1]
+    #Convert Columns to Text Strings
+    cols= list(tr.columns.values)
+    for col in cols:
+        d = datetime.strptime(str(col),'%Y-%m-%d %H:%M:%S')
+        wkno = d.isocalendar()[1]
+        colStr = 'Wk'+str(wkno)+' '+datetime.strftime(d,'%Y-%m-%d')
+        tr.rename(columns={col:colStr}, inplace=True)
+    
+    tr_new = tr.copy().round(2)
+    tr_new['YTDminus8W']= tmpResult.iloc[:, 0:-10].sum(axis=1)
+    #reorder the columns so the last column is the first
+    cols= list(tr_new.columns.values)
+    nCols = [cols[-1],cols[0],cols[1],cols[2],cols[3],cols[4],cols[5],cols[6],cols[7]]
+    tr_new = tr_new[nCols].round(2)
+    
+    
+    
+    tr_cumsum = tr_new.cumsum(axis=1).round(2)
+    tr_cumsum = tr_cumsum.rename(columns={"YTDminus8W": "Wkminus9"})
+    cols= list(tr_cumsum.columns.values)
+    for col in cols:
+        nCol = str(col)+'_YTD'
+        tr_cumsum.rename(columns={col:nCol}, inplace=True)
+        
+    tr_res = tr_new.join(tr_cumsum, how='outer')
+    
+    
+    #tr_res.assign(C=" ") #Empty Column Space
+    #tr_res.rename(columns = {'C':' '}, inplace = True) #So this shows up as empty
+    
+    #NOW GET PRECIP
+    precip = pd.pivot_table(data=tmp_df, 
+                           columns=pd.Grouper(freq='A', level='Date', closed='right'), 
+                           values=['Precipitation(in)'],
+                           index='Location', 
+                           aggfunc=np.sum,
+                          ).rename_axis(None).reset_index()
+    precip.columns = precip.columns.droplevel(0)
+    precip.columns = ['Location'] + ['YTD Precipitation(in)']
+    #precip.columns[1:].tolist()
+    precip.reset_index(drop=True, inplace=True)
+    precip.set_index('Location', inplace=True)
+    precip=precip.round(2)
+    
+    tr_res = tr_res.join(precip, how='outer')
+    
+    #GET YTD ETc
+    et = pd.pivot_table(data=tmp_df, 
+                           columns=pd.Grouper(freq='A', level='Date', closed='right'), 
+                           values=["ETc_low"],
+                           index='Location', 
+                           aggfunc=np.sum,
+                          ).rename_axis(None).reset_index()
+    et.columns = et.columns.droplevel(0)
+    et.columns = ['Location'] + ['YTD ETc(in)']
+    et.reset_index(drop=True, inplace=True)
+    et.set_index('Location', inplace=True)
+    #et.assign(C=" ") #Empty Column Space
+    #et.rename(columns = {'C':' '}, inplace = True) #So this shows up as empty
+    
+    tr_res = tr_res.join(et, how='outer')
+    
+    
+    return tr_res
+
+
+def makeTrueRedFalseBlank(html_str):
+    """
+    Colors elements in a dateframe
+    green if positive and red if
+    negative. Does not color NaN
+    values.
+    """
+    
+    old_str = '-'
+    new_str = '<font color=\"red\">'+old_str+'</font>'
+    
+    old_str2 = 'False'
+    new_str2 = ''
+    
+    ret_str = html_str.replace(old_str,new_str)
+    ret_str2 = ret_str.replace(old_str2,new_str2)
+    
+    return ret_str2
+
+
+def color_negative_red(value):
+    """
+    Colors elements in a dateframe
+    green if positive and red if
+    negative. Does not color NaN
+    values.
+    """
+    if value < 0:
+        color = 'red'
+    elif value > 0:
+        color = 'green'
+    else:
+        color = 'black'
+
+    return 'color: %s' % color
+
+
+def getAcresForField(Ranch, Field, acctProfile_df):
+    acres = acctProfile_df[(acctProfile_df.SubCategory==Ranch) & (acctProfile_df.Name==Field)].Acres.tolist()[0]
+    return acres
+
+def getAcresForField2(fieldassetid, acct_gdf):
+    #returns area in Acres
+    acct_gdf.crs = {'init' :'epsg:4326'}
+    f = acct_gdf[acct_gdf.fieldassetid==str(fieldassetid)].reset_index(drop=True).geometry
+    area_ac = area(mapping(f[0]))* 0.000247105
+    
+    return area_ac
+
+def getAcresForField3(fieldassetid, acct_gdf):
+    #returns area in Acres
+    acct_gdf.Name = acct_gdf.Name.str.upper()
+    fieldassetid = fieldassetid.upper()
+    acct_gdf.crs = {'init' :'epsg:4326'}
+    f = acct_gdf[acct_gdf.Name==str(fieldassetid)].reset_index(drop=True).geometry
+    area_ac = area(mapping(f[0]))* 0.000247105
+    
+    return area_ac
+
+def doHyperGrowFTP(File):
+    url = 'ftp.agralogics.com'
+    username = 'agls@agralogics.com'
+    passwd = 'AglsAdmin!2019'
+    ftpFolder='HyperGrow/'
+    file_path = Path(File)
+
+    with FTP(url, username, passwd, timeout=100000) as ftp, open(file_path, 'rb') as file:
+        ftp.storbinary(f'STOR {ftpFolder+file_path.name}', file)
+    return
+
+def doHyperGrowFTPToFolder(folder, File):
+    url = 'ftp.agralogics.com'
+    username = 'agls@agralogics.com'
+    passwd = 'AglsAdmin!2019'
+    ftpFolder=folder+'/'
+
+    file_path = Path(File)
+
+    with FTP(url, username, passwd) as ftp, open(file_path, 'rb') as file:
+        ftp.storbinary(f'STOR {ftpFolder+file_path.name}', file)
+    
+    return
+
+# In[830]:
+
+
+def getLinkTo(imgFile):
+    
+    file_path = Path(imgFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<a href=\"'+linkURL+'\">HyperGrow</a>'  
+    
+    return linkStr
+
+def getHTMLLinkTo(htmlFile):
+    
+    file_path = Path(htmlFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<a href=\"'+linkURL+'\">FieldMap</a>'  
+    
+    return linkStr
+
+# In[831]:
+
+
+def genEmbededLink(filePath):
+
+    pre = '<object data=\"'+filePath+'\" type=\"image/jpeg\" title=\"HyperGrow\" width=\"500\" height=\"720\">'
+    ref = '<a href=\"'+filePath+'\">HyperGrow</a>'
+    post='</object>'
+    
+    linkedStrAsCellValue = pre+ref+post
+    
+    return linkedStrAsCellValue
+
+
+# In[832]:
+
+
+#find the most recent pickle files for each field
+def getNearestImageFile(dt,ranch,field):
+    N=30
+    to_dt = dt
+    from_dt = to_dt-timedelta(days=N)
+
+    subset_df = imgfiles_df[(imgfiles_df.Date>=from_dt) &
+                      (imgfiles_df.Date<=to_dt) &
+                      (imgfiles_df.SubCategory==ranch) &
+                      (imgfiles_df.Name==field)]
+    subset_df.sort_values(by=['Date'], inplace=True)
+    subset_df = subset_df.reset_index(drop=True)
+    fp = subset_df.loc[(len(subset_df)-1),'filePath'] 
+    
+    return fp
+
+
+# In[833]:
+
+
+#find the most recent pickle files for each field
+def getNearestPklFile(dt,ranch,field):
+    N=30
+    to_dt = dt
+    from_dt = to_dt-timedelta(days=N)
+
+    subset_df = pklfiles_df[(pklfiles_df.Date>=from_dt) &
+                      (pklfiles_df.Date<=to_dt) &
+                      (pklfiles_df.SubCategory==ranch) &
+                      (pklfiles_df.Name==field)]
+    subset_df.sort_values(by=['Date'], inplace=True)
+    subset_df = subset_df.reset_index(drop=True)
+    #print(pklfiles_df)
+    fp = subset_df.loc[(len(subset_df)-1),'filePath'] 
+    
+    return fp
+
+
+# In[56]:
+
+
+def getPrevYrStartEndDates(curYrStartDtStr,curYrEndDtStr):
+    startDtStr_prev = endDtStr_prev = ''
+    curStartDt = datetime.strptime(curYrStartDtStr,'%Y-%m-%d')
+    curEndDt = datetime.strptime(curYrEndDtStr,'%Y-%m-%d')
+
+    #startDtStr_prev
+    if ((curStartDt.month==2) & (curStartDt.day==29)):
+        day='28'
+        startDtStr_prev = str(curStartDt.year-1) + '-' + str(curStartDt.month).rjust(2,'0') + '-' + day
+    else:
+        startDtStr_prev = str(curStartDt.year-1) + '-' + str(curStartDt.month).rjust(2,'0') + '-' + str(curStartDt.day).rjust(2,'0')
+    
+    #endDtStr_prev
+    if ((curEndDt.month==2) & (curEndDt.day==29)):
+        day='28'
+        endDtStr_prev = str(curEndDt.year-1) + '-' + str(curEndDt.month).rjust(2,'0') + '-' + day
+    else:
+        endDtStr_prev = str(curEndDt.year-1) + '-' + str(curEndDt.month).rjust(2,'0') + '-' + str(curEndDt.day).rjust(2,'0')
+
+    return [startDtStr_prev,endDtStr_prev]
+
+def getCumStartEndDates(currDtStr,reportEndDate):
+    startDtStr = endDtStr = ''
+    currDt = datetime.strptime(currDtStr,'%Y-%m-%d')
+
+    startDtStr = str(currDt.year) + '-01-01'
+    endDtStr = datetime.strftime(reportEndDate,'%Y-%m-%d')
+
+    return [startDtStr,endDtStr]
+
+
+def getPrevYrCumStartEndDates(currDtStr,reportEndDate):
+    startDtStr = endDtStr = ''
+    currDt = datetime.strptime(currDtStr,'%Y-%m-%d')
+
+    if ((currDt.month==2) & (currDt.day==29)):
+        day='28'
+    elif ((currDt.month==2) & (currDt.day==28) & (((currDt.year-1)%4)==0)):
+        day='29'
+    else:
+        day = str(reportEndDate.day)
+
+    startDtStr = str(currDt.year-1) + '-01-01'
+    endDtStr = str(reportEndDate.year-1) + '-' + str(reportEndDate.month).rjust(2,'0') + '-' + day.rjust(2,'0')
+
+    return [startDtStr,endDtStr]
+
+def getPrev7DayPeriod(currDtStr):
+    startDtStr = endDtStr = ''
+    currDt = datetime.strptime(currDtStr,'%Y-%m-%d')
+    startDt = currDt - timedelta(days=7)
+    endDt = currDt - timedelta(days=1)
+
+    startDtStr = datetime.strftime(startDt,'%Y-%m-%d')
+    endDtStr = datetime.strftime(endDt,'%Y-%m-%d')
+    return [startDtStr, endDtStr]
+
+def getPrev15DayPeriod(currDtStr):
+    startDtStr = endDtStr = ''
+    currDt = datetime.strptime(currDtStr,'%Y-%m-%d')
+    prev = currDt.replace(day=1) - timedelta(days=1)
+    if (currDt.day > 15):
+        first_day_of_current_month = currDt.replace(day=1)
+        startDtStr = datetime.strftime(first_day_of_current_month,'%Y-%m-%d')
+        endDtStr = datetime.strftime(first_day_of_current_month + timedelta(days=14),'%Y-%m-%d')
+    else:
+        startDtStr = datetime.strftime(prev.replace(day=1)+ timedelta(days=15),'%Y-%m-%d')
+        endDtStr = datetime.strftime(prev,'%Y-%m-%d')
+
+    return [startDtStr, endDtStr]
+
+def getPrevYr15DayPeriod(currDtStr):
+    startDtStrPrevYr = endDtStrPrevYr = ''
+    currDt = datetime.strptime(currDtStr,'%Y-%m-%d')
+
+    [startDtStr_currYr, endDtStr_currYr] = getPrev15DayPeriod(currDtStr)
+    startDt_currYr = datetime.strptime(startDtStr_currYr,'%Y-%m-%d')
+    endDt_currYr = datetime.strptime(endDtStr_currYr,'%Y-%m-%d')
+
+    #print(currDt)
+
+    if (currDt.day > 15):
+        startDtStr = str(startDt_currYr.year-1) + '-' + str(startDt_currYr.month).rjust(2,'0') + '-' + '01'
+        endDtStr = str(endDt_currYr.year-1) + '-' + str(endDt_currYr.month).rjust(2,'0') + '-' + '15'
+        startDtStrPrevYr = startDtStr
+        endDtStrPrevYr = endDtStr
+    else:
+        yr = startDt_currYr.year-1
+        mo = startDt_currYr.month
+        startDtStr = (str(yr) + '-' + str(mo).rjust(2,'0') + '-' + '16')
+        startDtStrPrevYr = startDtStr
+
+        firstDayOfMonStr = str(currDt.year-1) + '-' + str(currDt.month).rjust(2,'0') + '-' + '01'
+        first_day_of_month = datetime.strptime(firstDayOfMonStr,'%Y-%m-%d')
+        last_day_of_month = first_day_of_month - timedelta(days=1)
+        endDtStrPrevYr = datetime.strftime(last_day_of_month,'%Y-%m-%d')
+
+    return [startDtStrPrevYr, endDtStrPrevYr]
+
+
+# In[118]:
+def averageETos(df):
+    eto_df = df[['ETo(in)','ReferenceETo(in)']].astype('float')
+    eto_df['ReferenceETo(in)'] = eto_df.mean(skipna = True, axis=1)
+    
+    new_df = df.copy()
+    new_df['ReferenceETo(in)'] = eto_df['ReferenceETo(in)']
+    
+    return new_df
+
+def averageETs(currYr_df,prevYr_df):
+    et_currYr_df = currYr_df[['ET_p90','ET_unif','ETc','ETc_low','ETm']].astype('float')
+    et_prevYr_df = prevYr_df[['ET_p90','ET_unif','ETc','ETc_low','ETm']].astype('float')
+    
+    et_currYr_df[et_currYr_df.isnull()] = et_prevYr_df #update the NaN values with prevYr's values
+    
+    et_currYr_df = et_currYr_df.interpolate() #Interpolate any NaNs still there.
+    
+    new_df = currYr_df.copy()
+    new_df['ET_p90'] = et_currYr_df['ET_p90']
+    new_df['ET_unif'] = et_currYr_df['ET_unif']
+    new_df['ETc'] = et_currYr_df['ETc']
+    new_df['ETc_low'] = et_currYr_df['ETc_low']
+    new_df['ETm'] = et_currYr_df['ETm']
+    
+    return new_df
+
+def interpolateAndFill(currYr_df,prevYr_df,reportStartDateStr,reportEndDateStr):
+    reportStartDt = datetime.strptime(reportStartDateStr,'%Y-%m-%d')
+    reportEndDt = datetime.strptime(reportEndDateStr,'%Y-%m-%d')
+    
+    [prevYrStartDateStr,preYrEndDateStr] = getPrevYrStartEndDates(reportStartDateStr,reportEndDateStr)
+    prevYrReportStartDt = datetime.strptime(prevYrStartDateStr,'%Y-%m-%d')
+    prevYrReportEndDt = datetime.strptime(preYrEndDateStr,'%Y-%m-%d')
+    
+    field_df = averageETos(currYr_df) #fix the ETo
+    field_df = averageETs(field_df,prevYr_df) #fix the ETc numbers with prev Yr if NaN
+    
+    return field_df
+
+
+def getStartEndDates(adf):
+    startDtStr = datetime.strftime(min(adf.Date),'%Y-%m-%d')
+    endDtStr = datetime.strftime(max(adf.Date),'%Y-%m-%d')
+    
+    return [startDtStr, endDtStr]
+
+
+#IF THE ET IS NULL, THEN USE (ET FROM LAST YEAR * RATIO OF ETO) AS THESE ARE PERMANENT ORCHARDS
+def fixDF(adf):
+    [reportStartDateStr,reportEndDateStr]=getStartEndDates(adf)
+    
+    [startDtStr_prev,endDtStr_prev] = getPrevYrStartEndDates(reportStartDateStr,reportEndDateStr)
+    prevYr_adf = acct_gdf[(acct_gdf.Date >= startDtStr_prev) & (acct_gdf.Date <= endDtStr_prev)]
+    prevYr_adf.reset_index(drop=True,inplace=True)
+    
+    list_of_unique_fields = pd.unique(adf.Name)
+    a_new_gdf = pd.DataFrame() 
+    for field in list_of_unique_fields:
+        currYr_df = adf[adf.Name==field]
+        currYr_df.reset_index(drop=True,inplace=True)
+    
+        prevYr_df = prevYr_adf[prevYr_adf.Name==field]
+        prevYr_df.reset_index(drop=True,inplace=True)
+    
+        df = interpolateAndFill(currYr_df,prevYr_df,reportStartDateStr,reportEndDateStr)
+
+        a_new_gdf = a_new_gdf.append(df, ignore_index=True)
+    
+    return a_new_gdf
+
+def getAGLS_emailText():
+    
+    it = 'Dear Agralogics Customer, <br><br>Please see your HyperGrow* report below.'
+    et = 'Email us with any questions or concerns you might have support@jagralogics.com .' + '<br><br>' + 'Sincerely,' + '<br><br>' + 'The Agralogics Team'
+    
+    return [it,et]
+def getJAIN_emailText():
+    
+    it = 'Dear Jain Irrigation Customer, <br><br>Please see your HyperGrow* report below powered by Agralogics,Inc.'
+    et = 'Email us with any questions or concerns you might have jiisupport@jainsusa.com .' + '<br><br>' + 'Sincerely,' + '<br><br>' + 'Jain Agricultural Services'
+    
+    return [it,et]
+
+def getPAG_emailText():
+    it = 'Dear Principle Ag Customer, <br><br>Please see your HyperGrow* report below, powered by Agralogics,Inc.'
+    et = 'Email us with any questions or concerns you might have.'+ '<br><br>' + 'Jens 509-760-2572 jens@principleag.com'+ '<br>' +'Mike 509-989-5955 mike@principleag.com'+ '<br><br>' + 'Sincerely,' + '<br><br>' + 'The Principle Ag Team'
+    #et = 'Email us with any questions or concerns you might have support@jagralogics.com .' + '<br><br>' + 'Sincerely,' + '<br><br>' + 'The Agralogics Team'
+    return [it,et]
+
+def getLinkToLogo(pngFile):
+    file_path = Path(pngFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<img src=\"'+linkURL+'\" alt="Image" height="100" width="300">'
+    return linkStr
+
+def getLinkToAGLSLogo(pngFile):
+    file_path = Path(pngFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<img src=\"'+linkURL+'\" alt="Image">'
+    return linkStr
+
+def getLinkToPAGLogo(pngFile):
+    file_path = Path(pngFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<img src=\"'+linkURL+'\" alt="Image">'
+    return linkStr
+
+def saveHyperGrowFig(img,cmp,vmin,vmax,imgOutFile):
+    fig = plt.figure()
+    plt.imshow(img,cmap=cmp, vmin=vmin,vmax=vmax)
+    gca().set_xticklabels(['']*img.shape[0])
+    gca().set_yticklabels(['']*img.shape[1])
+    fig.gca().set_axis_off()
+    fig.patch.set_facecolor('#ffffff')
+    fig.patch.set_alpha(0)
+    fig.savefig(imgOutFile, dpi=600, bbox_inches='tight', pad_inches=0, transparent=True)
+    return
+
+# In[13]:
+def makeFieldMap(imgFile2,acctProfile_df):
+    #try:
+    ranchNameUpper = imgFile2.split('/')[8].split('_')[0]
+    fieldNameUpper = imgFile2.split('/')[8].split('_')[1]
+    imgName = imgFile2.split('/')[8].split('__')[0]
+    dt = imgFile2.split('.')[0].split('_')[-1]
+    #print(ranchNameUpper, fieldNameUpper, dt)
+
+    #get the bounding box of the img
+    gdf = acctProfile_df[(acctProfile_df.Name.str.replace(' ','').str.upper()==fieldNameUpper) & 
+                (acctProfile_df.SubCategory.str.replace(' ','').str.upper()==ranchNameUpper)]
+    gdf.reset_index(inplace=True,drop=True)
+    gdf.crs = {'init': 'epsg:4326', 'no_defs': True}
+
+    #gdf['geometry'] = gdf['geometry'].to_crs(epsg=3857)
+    #gdf = gdf.to_crs({'init': 'epsg:3857'})
+
+    fieldPoly = gdf.geometry[0]
+    #set the extent
+    min_lon = fieldPoly.bounds[0]
+    max_lon = fieldPoly.bounds[2]
+    min_lat = fieldPoly.bounds[1]
+    max_lat = fieldPoly.bounds[3]
+
+    center_lat = fieldPoly.centroid.coords.xy[1][0]
+    center_lon = fieldPoly.centroid.coords.xy[0][0]
+    # create the map
+    m = folium.Map(location=[center_lat, center_lon],
+           tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 
+           projection=4326,
+           attr='Rendered by AGRALOGICS using ESRI & GeoEye Basemaps',
+           zoom_start = 15)
+
+    folium.raster_layers.ImageOverlay(
+    image=imgFile2,
+    name=imgName,
+    bounds=[[min_lat, min_lon], [max_lat, max_lon]],
+    opacity=1,
+    interactive=False,
+    cross_origin=False,
+    zindex=1,
+    alt=imgName
+    ).add_to(m)
+
+    #folium.LayerControl().add_to(m)
+    outFile = '/'.join(imgFile2.replace('/images/','/reports/').split('/')[0:-1])+'/'+imgName+'_HyperGrow_'+dt+'.html'
+    m.save(outFile)
+
+
+    of = outFile
+    
+    #except:
+    #    print('Exception in makeFieldMap()')
+    #    of = []
+   
+    return of
+
+
+def makeFieldMapJL(imgFile2,acctProfile_df):
+    #try:
+    customerid = imgFile2.split('/')[-1].split('_')[1]
+    fieldassetid = imgFile2.split('/')[-1].split('_')[3]
+    imgName = imgFile2.split('/')[-1].split('__')[0]
+    dt = imgFile2.split('.')[0].split('_')[-1]
+
+    #get the bounding box of the img
+    gdf = acctProfile_df[(acctProfile_df.customerid.str.replace(' ','')==customerid) & 
+                (acctProfile_df.fieldassetid.str.replace(' ','')==fieldassetid)]
+    gdf.reset_index(inplace=True,drop=True)
+    gdf.crs = {'init': 'epsg:4326', 'no_defs': True}
+
+    fieldPoly = gdf.geometry[0]
+    #set the extent
+    min_lon = fieldPoly.bounds[0]
+    max_lon = fieldPoly.bounds[2]
+    min_lat = fieldPoly.bounds[1]
+    max_lat = fieldPoly.bounds[3]
+
+    center_lat = fieldPoly.centroid.coords.xy[1][0]
+    center_lon = fieldPoly.centroid.coords.xy[0][0]
+    # create the map
+    m = folium.Map(location=[center_lat, center_lon],
+           tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 
+           projection=4326,
+           attr='Rendered by AGRALOGICS, Inc. using ESRI & GeoEye Basemaps',
+           zoom_start = 15)
+
+    folium.raster_layers.ImageOverlay(
+    image=imgFile2,
+    name=imgName,
+    bounds=[[min_lat, min_lon], [max_lat, max_lon]],
+    opacity=1,
+    interactive=False,
+    cross_origin=False,
+    zindex=1,
+    alt=imgName
+    ).add_to(m)
+
+    #folium.LayerControl().add_to(m)
+    outFile = tmpDir+imgName+'_HyperGrow_'+dt+'.html'
+    m.save(outFile)
+
+
+    of = outFile
+    
+    #except:
+    #    print('Exception in makeFieldMap()')
+    #    of = []
+   
+    return of
+
+def makeFieldMapPAG(imgFile2,acctProfile_df):
+    #try:
+    customerid = imgFile2.split('/')[-1].split('_')[0]
+    fieldassetid = '_'.join(imgFile2.split('/')[-1].split('__')[0].split('_')[1:])
+    imgName = imgFile2.split('/')[-1].split('__')[0].upper()
+    dt = imgFile2.split('.')[0].split('_')[-1]
+
+    #print([customerid, fieldassetid, imgName, dt])
+    #print(acctProfile_df.iloc[0])
+    #print(acctProfile_df.columns)
+
+    #get the bounding box of the img
+
+    gdf = acctProfile_df[(acctProfile_df.Category.str.replace(' ','')==customerid.replace(' ','')) & 
+                (acctProfile_df.Name.str.replace(' ','')==fieldassetid.replace(' ',''))]
+    gdf.reset_index(inplace=True,drop=True)
+    gdf.crs = {'init': 'epsg:4326', 'no_defs': True}
+
+    #print(gdf)
+
+    fieldPoly = gdf.geometry[0]
+    #set the extent
+    min_lon = fieldPoly.bounds[0]
+    max_lon = fieldPoly.bounds[2]
+    min_lat = fieldPoly.bounds[1]
+    max_lat = fieldPoly.bounds[3]
+
+    center_lat = fieldPoly.centroid.coords.xy[1][0]
+    center_lon = fieldPoly.centroid.coords.xy[0][0]
+    # create the map
+    m = folium.Map(location=[center_lat, center_lon],
+           tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 
+           projection=4326,
+           attr='Rendered by AGRALOGICS, Inc. using ESRI & GeoEye Basemaps',
+           zoom_start = 15)
+
+    folium.raster_layers.ImageOverlay(
+    image=imgFile2,
+    name=imgName,
+    bounds=[[min_lat, min_lon], [max_lat, max_lon]],
+    opacity=1,
+    interactive=False,
+    cross_origin=False,
+    zindex=1,
+    alt=imgName
+    ).add_to(m)
+
+    #folium.LayerControl().add_to(m)
+    outFile = tmpDir+imgName+'_HyperGrow_'+dt+'.html'
+    m.save(outFile)
+
+
+    of = outFile
+    
+    #except:
+    #    print('Exception in makeFieldMap()')
+    #    of = []
+   
+    return of
+
+def getHGReportDates(acct):
+    rpt_endStr = '_HyperGrow.json'
+    rptPath = acctReportRoot + 'JainlogicCustomerid_'+str(acct)+'/reports/'
+    list_of_HG_endDtStrs = [datetime.strptime(x.split('_')[3], '%Y-%m-%d')  for x in os.listdir(rptPath) if x.endswith(rpt_endStr)]
+    latestEndDt = max(list_of_HG_endDtStrs)
+    latestStartDt = latestEndDt - timedelta(days=6)
+    endDtStr = datetime.strftime(latestEndDt, '%Y-%m-%d')
+    startDtStr = datetime.strftime(latestStartDt, '%Y-%m-%d')
+    
+    return startDtStr, endDtStr
+
+def getHVReportDate(acct):
+    rpt_endStr = '_HyperView.json'
+    rptPath = acctReportRoot + 'JainlogicCustomerid_'+str(acct)+'/reports/'
+    list_of_HV_endDtStrs = [datetime.strptime(x.split('_')[2], '%Y-%m-%d')  for x in os.listdir(rptPath) if x.endswith(rpt_endStr)]
+    latestEndDt = max(list_of_HV_endDtStrs)
+    latestStartDt = latestEndDt - timedelta(days=6)
+    endDtStr = datetime.strftime(latestEndDt, '%Y-%m-%d')
+    
+    return endDtStr
+
+
+def getAGLSHGReportDates(acct):
+    rpt_endStr = '_HyperGrow.json'
+    rptPath = agls_acctOutputPath + str(acct)+'/reports/'
+    list_of_HG_endDtStrs = [datetime.strptime(x.split('_')[3], '%Y-%m-%d')  for x in os.listdir(rptPath) if x.endswith(rpt_endStr)]
+    latestEndDt = max(list_of_HG_endDtStrs)
+    latestStartDt = latestEndDt - timedelta(days=6)
+    endDtStr = datetime.strftime(latestEndDt, '%Y-%m-%d')
+    startDtStr = datetime.strftime(latestStartDt, '%Y-%m-%d')
+    
+    return startDtStr, endDtStr
+
+def getAGLSHVReportDate(acct):
+    rpt_endStr = '_HyperView.json'
+    rptPath = agls_acctOutputPath +str(acct)+'/reports/'
+    list_of_HV_endDtStrs = [datetime.strptime(x.split('_')[2], '%Y-%m-%d')  for x in os.listdir(rptPath) if x.endswith(rpt_endStr)]
+    latestEndDt = max(list_of_HV_endDtStrs)
+    latestStartDt = latestEndDt - timedelta(days=6)
+    endDtStr = datetime.strftime(latestEndDt, '%Y-%m-%d')
+    
+    return endDtStr	
+
+def getRegionForJLAcctid(p):
+    region=''
+    
+    if p.within(cap):
+        region='CA'
+    elif p.within(azp):
+        region='AZ'
+    elif p.within(wap):
+        region='WA'
+    elif p.within(txp):
+        region='TX'
+    elif p.within(flp):
+        region='FL'
+    else:
+        for ausp in ausp_list:
+            if p.within(ausp):
+                region='AUS'
+                break
+            else:
+                continue
+    if not len(region)>0:
+        region='NA'
+
+    return region
+
+def generateAndMergeForecastETo2(acct_gdf,Weather2020_gdf,startDtStr, endDtStr):
+    start = datetime.strptime(startDtStr,'%Y-%m-%d')
+    end = datetime.strptime(endDtStr,'%Y-%m-%d')
+    #-timedelta(days=1) #This date is NOT included
+
+    list_of_dates = [start + timedelta(days=x) for x in range(0, (end-start).days+1)]
+
+    startt = time.time()
+    EToForAccounts_2020 = pd.DataFrame()
+    for i,row in acct_gdf.iterrows():
+        print('\tAcct: '+str(row.Category)+', Ranch:'+row.SubCategory+', Field:'+row.Name)
+        start_time = time.time()
+        c = row.CentroidPoint
+        if (type(c)==str):
+            c = wkt.loads(row.CentroidPoint)
+
+        etv = getForecastEToForDates(c,list_of_dates,Weather2020_gdf)
+
+        #now add the columns for the other fields to etv
+        etv['UUID']=row.UUID
+        etv['Category']=row.Category
+        etv['SubCategory']=row.SubCategory
+        etv['Name']=row.Name
+
+        EToForAccounts_2020 = EToForAccounts_2020.append(etv, ignore_index = True)
+    print("ETo Done --- %s seconds ---" % (time.time() - startt))
+    EToForAccounts = EToForAccounts_2020.rename(columns={"ReferenceETo(in)": "ETo(in)"})
+    merged_df = pd.merge(acct_gdf, EToForAccounts, on=['Category','SubCategory','Name', 'UUID'])
+    merged_df.reset_index() #reset the index to avoid any export issues
+    #merged_df['Category'] = 'JainlogicCustomerid_' + merged_df['customerid'].astype(str)
+    merged_df['Date'] = pd.to_datetime(merged_df['Date'])
+
+    return merged_df
+
+
+def generateAndMergeForecastETo(acct_gdf,Weather2020_gdf,startDtStr, endDtStr):
+    start = datetime.strptime(startDtStr,'%Y-%m-%d')
+    end = datetime.strptime(endDtStr,'%Y-%m-%d')
+    #-timedelta(days=1) #This date is NOT included
+
+    list_of_dates = [start + timedelta(days=x) for x in range(0, (end-start).days+1)]
+
+    startt = time.time()
+    EToForAccounts_2020 = pd.DataFrame()
+    for i,row in acct_gdf.iterrows():
+        print('\tAcct: '+str(row.customerid)+', Asset: '+str(row.fieldassetid)+', Ranch:'+row.SubCategory+', Field:'+row.Name)
+        start_time = time.time()
+        c = row.CentroidPoint
+        if (type(c)==str):
+            c = wkt.loads(row.CentroidPoint)
+
+        etv = getForecastEToForDates(c,list_of_dates,Weather2020_gdf)
+
+        #now add the columns for the other fields to etv
+        etv['UUID']=row.UUID
+        etv['Category']=row.Category
+        etv['SubCategory']=row.SubCategory
+        etv['Name']=row.Name
+
+        EToForAccounts_2020 = EToForAccounts_2020.append(etv, ignore_index = True)
+    print("ETo Done --- %s seconds ---" % (time.time() - startt))
+    EToForAccounts = EToForAccounts_2020.rename(columns={"ReferenceETo(in)": "ETo(in)"})
+    merged_df = pd.merge(acct_gdf, EToForAccounts, on=['Category','SubCategory','Name', 'UUID'])
+    merged_df.reset_index() #reset the index to avoid any export issues
+    merged_df['Category'] = 'JainlogicCustomerid_' + merged_df['customerid'].astype(str)
+    merged_df['Date'] = pd.to_datetime(merged_df['Date'])
+
+    return merged_df
+
+def getForecastEToForDates(p,list_of_dates,df):
+    N=5 #default
+    #gets the weather metrics for the METRIC calcs for a point for each of the dates based
+    #of the closest N stns #given the geopandas geodataframe gpd
+
+    #Screen out the null values
+    df = df[df['ReferenceETo(in)']!='--']
+
+    cols_list = ['Date',
+                 'ReferenceETo(in)'
+                ]
+    
+    df_eto_for_dates = pd.DataFrame(columns=cols_list)
+    try:
+        df.Date=pd.to_datetime(df.Date)
+    except:
+        df.Date=pd.to_datetime(df.Date, utc=True)
+        
+    idxx=0
+    for dt in list_of_dates:
+        df_dt = df[df.Date==dt]
+        stnPoints = list(pd.unique(df_dt.geometry))
+        stns = pd.unique(df_dt.StationId)
+
+        #first get the nearest stns and weights for the point provided
+        [ids, pts, dis, wts] = getNearestNStnIDsInOrder_Forecast(p,stnPoints,5)
+
+        nearestStnIDs = stns[ids]
+        eto=[]
+        for stn in nearestStnIDs:
+            eto.append(float(df_dt[df_dt.StationId==stn]['ReferenceETo(in)'].values.tolist()[0]))
+    
+        weighted_eto = np.nansum(np.array(eto)*np.array(wts))
+
+        df_eto_for_dates.loc[idxx,'Date']=dt
+        df_eto_for_dates.loc[idxx,'ReferenceETo(in)']=weighted_eto
+        idxx=idxx+1
+
+    return df_eto_for_dates
+
+def getNearestNStnIDsInOrder_Forecast(c,stnPoints,N):
+    #returns the indexes, 
+    #the sorted list of stns, 
+    #the distances and 
+    #the weights (w=1/dis)
+
+    dist = []
+    for p in stnPoints:
+        d = float(c.distance(p))
+        if d==0:
+            d=0.000001
+        else:
+            dist.append(d)
+
+    idx = np.array([i[0] for i in sorted(enumerate(dist), key=lambda x:x[1])])
+    orderedStns = [stnPoints[i] for i in idx]
+    orderedDist = [dist[i] for i in idx]
+
+    M = min(N, len(stnPoints))
+
+    orderedWghts=[]
+    invDist = []
+    for d in orderedDist[0:M]:
+        invDist.append(1/d)
+    den = sum(invDist)   
+    for w in invDist:
+        orderedWghts.append(w/den)
+
+    return [idx[0:M],orderedStns[0:M],orderedDist[0:M],orderedWghts]
+
+def generateForecastedETc2(merged_df):
+    unique_accounts = pd.unique(merged_df.Category)
+    print('\nRunning ETc for accts'+str(unique_accounts))
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for a in unique_accounts:
+        #try:
+        starta = time.time()
+
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = agls_acctForecastOutputPath + a + '/data/'
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.Category == a]
+
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+
+        #for every day, do the following analysis and print
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+
+        #read the ETc file for the last 7 days and file the latest date
+        startDt = unique_dts[0] #get the first date as the startDt
+        etc_acct_dir = agls_acctOutputPath + a + '/data/'
+        #etc_acct_dir = acctOutputPath + 'JainlogicCustomerid_'+ a + '/data/'
+
+        jsonFileList = [x for x in os.listdir(etc_acct_dir) if x.endswith('.json')]
+        jsonFileList.sort()
+
+        #print(jsonFileList)
+
+        list_of_recent_etcfiles = [x for x in jsonFileList if datetime.strptime(x.split('.')[0].split('_')[-1], '%Y-%m-%d') >= (startDt-timedelta(days=60)) ]
+        list_of_recent_etcfiles.sort()
+        print('\t\nTotal files in last 60 days files = '+str(len(list_of_recent_etcfiles)))
+
+        
+        if len(list_of_recent_etcfiles)>0:
+            etc_gdf = gpd.GeoDataFrame()
+            for jsonFile in list_of_recent_etcfiles:
+                etFile = etc_acct_dir+jsonFile
+                with open(etFile, "r") as read_file:
+                    data = json.load(read_file)
+                    try:
+                        g = gpd.GeoDataFrame.from_features(data["features"])
+                        etc_gdf = etc_gdf.append(g,ignore_index=True)
+                    except:
+                        json_data = json.loads(data)
+                        g = gpd.GeoDataFrame.from_features(json_data["features"])
+                        etc_gdf = etc_gdf.append(g,ignore_index=True)
+            currentETraw_df = etc_gdf[['Date','Category','SubCategory','Name','ETo(in)','ETc','ETc_low']]
+            currentETraw_df.Date = pd.to_datetime(currentETraw_df.Date)
+            floatCols = ['ETo(in)','ETc','ETc_low']
+            currentETraw_df[floatCols] = currentETraw_df[floatCols].astype('float')
+            currentETraw_df[floatCols] = currentETraw_df[floatCols].replace(0,np.nan)
+
+            #Now interpolate for each assetid
+            list_of_et_fields = pd.unique(currentETraw_df.Name).tolist()
+            list_of_et_fields.sort()
+
+            currentET_df = gpd.GeoDataFrame()
+            for field in list_of_et_fields:
+                gdf = currentETraw_df[currentETraw_df.Name==field]
+                gdf.reset_index(drop=True, inplace=True)
+                gdf.set_index('Date', inplace=True)
+                #gdf = gdf.resample('D').mean()
+                #print('\nBefore interpolation')
+                #print(gdf)
+                gdf[floatCols] = gdf[floatCols].interpolate(method='linear', limit_direction='both', axis=0)
+                #print('\nAfter interpolation')
+                #print(gdf)
+                gdf.reset_index(inplace=True)
+                gdf = gdf.sort_values(by=['Date'])
+                gdf = gdf.iloc[-1:]
+                #tail(1)
+                gdf.reset_index(drop=True, inplace=True)
+                currentET_df = currentET_df.append(gdf, ignore_index=True)
+
+            currentET_df.dropna(subset=floatCols)
+            #currentET_df = currentET_df.sort_values(by=['Date'])
+            #get the last row (latest value)
+
+            """
+            latest_etc_file = list_of_recent_etcfiles[-1]
+            latest_etc_dt = datetime.strptime(latest_etc_file.split('__')[1].split('_')[1].split('.')[0], '%Y-%m-%d')
+            latest_etc_dtStr = datetime.strftime(latest_etc_dt, '%Y-%m-%d')
+
+            #Read the ETc File
+            etc_gdf = gpd.GeoDataFrame()
+            with open(etc_acct_dir+latest_etc_file, "r") as read_file:
+                data = json.load(read_file)
+                try:
+                    g = gpd.GeoDataFrame.from_features(data["features"])
+                    etc_gdf = etc_gdf.append(g,ignore_index=True)
+                except:
+                    json_data = json.loads(data)
+                    g = gpd.GeoDataFrame.from_features(json_data["features"])
+                    etc_gdf = etc_gdf.append(g,ignore_index=True)
+            currentET_df = etc_gdf[['Date','customerid', 'fieldassetid','ETo(in)','ETc','ETc_low']]
+            currentET_df.Date = pd.to_datetime(currentET_df.Date)
+            floatCols = ['ETo(in)','ETc','ETc_low']
+            currentET_df[floatCols] = currentET_df[floatCols].astype('float')
+            """
+            ### DEBUG
+            #print('\n\nFinal currentET_df:')
+            #print(len(currentET_df))
+            #print(currentET_df)
+            ##############
+
+
+            for dt in unique_dts:
+                endDay = dt        
+                startd = time.time()
+
+                etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+                jsonFile = acct_dir + acctName+'__ForecastedET_'+etoDateStr+'.json'
+
+                acctGDF_date = acctGDF[acctGDF.Date==dt]
+                acctGDF_date.reset_index(drop=True, inplace=True)
+
+                print('\t\t'+etoDateStr)
+                for i,row in acctGDF_date.iterrows():
+
+                    acct = row.Category
+                    ranch = row.SubCategory
+                    field = row.Name
+
+                    #ETo 
+                    eto = row['ETo(in)']
+
+                    #get the last ETo, ETc and ETc_low for this assetid
+                    etdf = currentET_df[(currentET_df.SubCategory==ranch) &
+                                        (currentET_df.Name==field)]
+                    etdf.reset_index(drop=True, inplace=True)
+
+                    #print(etdf)
+
+
+                    lastETo = etdf['ETo(in)'][0]
+                    lastETc = etdf.ETc[0]
+                    lastETc_low = etdf.ETc_low[0]
+
+                    eto_ratio = eto / lastETo
+                    ETc_prorated = eto_ratio * lastETc
+                    ETc_low_prorated = eto_ratio * lastETc_low
+
+                    #print([customerid, fieldassetid, eto, lastETo, ETc_prorated, ETc_low_prorated])
+                    acctGDF_date.loc[i,'EToRatio']=eto_ratio
+                    acctGDF_date.loc[i,'ETc']=ETc_prorated
+                    acctGDF_date.loc[i,'ETc_low']=ETc_low_prorated
+
+                """
+                acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+                acctGDF_date['Acres'] = acctGDF_date['Acres'].astype('str')
+                acctGDF_date['EToRatio'] = acctGDF_date['EToRatio'].astype('str')
+                acctGDF_date['ETc'] = acctGDF_date['ETc'].astype('str')
+                acctGDF_date['ETc_low'] = acctGDF_date['ETc_low'].astype('str')
+                print(acctGDF_date.ETc.tolist())
+
+                #save the values
+                acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+                acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+                if 'CentroidPoint' in acctGDF_date.columns:
+                    acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+                #print(type(acctGDF_date))
+                """
+                acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+                acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+                acctGDF_date['to_email_list'] = acctGDF_date['to_email_list'].astype('str')
+                acctGDF_date['cc_email_list'] = acctGDF_date['cc_email_list'].astype('str')
+                acctGDF_date['bcc_email_list'] = acctGDF_date['bcc_email_list'].astype('str')
+                acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+                acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+
+                #print(type(acctGDF_date))
+                print(acctGDF_date.ETc.tolist())
+                
+                #save the values
+
+                #for idx, roww in acctGDF_date.iterrows():
+                #	print(roww)
+
+
+                acctGDF_date.to_file(jsonFile, driver = 'GeoJSON', encoding='utf-8')
+
+            print("\tEND --- %s seconds ---" % (time.time() - starta))
+            print('\tDone!')
+        else:
+            print('No historical data for Acct: '+str(a))
+            continue
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+>>>>>>> Rajat
 
                     plt.ioff();
                     with open(imgFile, 'wb') as outfile:
@@ -26494,6 +29661,7 @@ def interpolateAndOverWriteNaNs(a_gdf, startDtStr, endDtStr):
         return pd.DataFrame(), []
 def getEToForStnList(obs_latest_gdf, list_of_stns):
 
+<<<<<<< HEAD
     allETo_gdf = gpd.GeoDataFrame()
     minElements = ['TT','TN1','TX1']
     for stn in list_of_stns:
@@ -26673,10 +29841,871 @@ def parse_point(record):
     return point
 
 def unparse_point(record):
+=======
+def generateForecastedETc(merged_df):
+    unique_accounts = pd.unique(merged_df.Category)
+    print('\nRunning ETc for accts'+str(unique_accounts))
+    startt = time.time()
+    #Now to put this into the output folder for each account
+    print("Start --- %s  ---" % datetime.now())
+
+    for a in unique_accounts:
+        #try:
+        starta = time.time()
+
+        print('\n\tWriting...%s ' % a)
+        print("\tStart --- %s  ---" % datetime.now())
+        acctName = a.upper()
+        acct_dir = acctForecastOutputPath + a + '/data/'
+        #create the directory if one doesn't exist
+        if not os.path.exists(acct_dir):
+            os.makedirs(acct_dir)
+
+        #For each account, take the subset of the acct_df 
+        acctDF = merged_df[merged_df.Category == a]
+
+        acctGDF = gpd.GeoDataFrame(acctDF,geometry=acctDF.geometry)
+
+        #for every day, do the following analysis and print
+        acct_dates_list = acctGDF.Date.tolist()
+        unique_dts = pd.unique(acct_dates_list) # so we don't multiple count for each field
+        unique_dts.sort()
+
+
+        #read the ETc file for the last 7 days and file the latest date
+        startDt = unique_dts[0] #get the first date as the startDt
+        etc_acct_dir = acctOutputPath + a + '/data/'
+        #etc_acct_dir = acctOutputPath + 'JainlogicCustomerid_'+ a + '/data/'
+
+        jsonFileList = [x for x in os.listdir(etc_acct_dir) if x.endswith('.json')]
+        jsonFileList.sort()
+
+        #print(jsonFileList)
+
+        list_of_recent_etcfiles = [x for x in jsonFileList if datetime.strptime(x.split('__')[1].split('_')[1].split('.')[0], '%Y-%m-%d') >= (startDt-timedelta(days=60)) ]
+        list_of_recent_etcfiles.sort()
+        print('\t\nTotal files in last 30 days files = '+str(len(list_of_recent_etcfiles)))
+
+        
+        if len(list_of_recent_etcfiles)>0:
+            etc_gdf = gpd.GeoDataFrame()
+            for jsonFile in list_of_recent_etcfiles:
+                etFile = etc_acct_dir+jsonFile
+                with open(etFile, "r") as read_file:
+                    data = json.load(read_file)
+                    try:
+                        g = gpd.GeoDataFrame.from_features(data["features"])
+                        etc_gdf = etc_gdf.append(g,ignore_index=True)
+                    except:
+                        json_data = json.loads(data)
+                        g = gpd.GeoDataFrame.from_features(json_data["features"])
+                        etc_gdf = etc_gdf.append(g,ignore_index=True)
+            currentETraw_df = etc_gdf[['Date','customerid','fieldassetid','ETo(in)','ETc','ETc_low']]
+            currentETraw_df.Date = pd.to_datetime(currentETraw_df.Date)
+            floatCols = ['ETo(in)','ETc','ETc_low']
+            currentETraw_df[floatCols] = currentETraw_df[floatCols].astype('float')
+            currentETraw_df[floatCols] = currentETraw_df[floatCols].replace(0,np.nan)
+
+            #Now interpolate for each assetid
+            list_of_et_assetsids = pd.unique(currentETraw_df.fieldassetid).tolist()
+            list_of_et_assetsids.sort()
+
+            currentET_df = gpd.GeoDataFrame()
+            for assetid in list_of_et_assetsids:
+                gdf = currentETraw_df[currentETraw_df.fieldassetid==assetid]
+                gdf.reset_index(drop=True, inplace=True)
+                gdf.set_index('Date', inplace=True)
+                #gdf = gdf.resample('D').mean()
+                #print('\nBefore interpolation')
+                #print(gdf)
+                gdf[floatCols] = gdf[floatCols].interpolate(method='linear', limit_direction='both', axis=0)
+                #print('\nAfter interpolation')
+                #print(gdf)
+                gdf.reset_index(inplace=True)
+                gdf = gdf.sort_values(by=['Date'])
+                gdf = gdf.iloc[-1:]
+                #tail(1)
+                gdf.reset_index(drop=True, inplace=True)
+                currentET_df = currentET_df.append(gdf, ignore_index=True)
+
+            currentET_df.dropna(subset=floatCols)
+            #currentET_df = currentET_df.sort_values(by=['Date'])
+            #get the last row (latest value)
+
+            """
+            latest_etc_file = list_of_recent_etcfiles[-1]
+            latest_etc_dt = datetime.strptime(latest_etc_file.split('__')[1].split('_')[1].split('.')[0], '%Y-%m-%d')
+            latest_etc_dtStr = datetime.strftime(latest_etc_dt, '%Y-%m-%d')
+
+            #Read the ETc File
+            etc_gdf = gpd.GeoDataFrame()
+            with open(etc_acct_dir+latest_etc_file, "r") as read_file:
+                data = json.load(read_file)
+                try:
+                    g = gpd.GeoDataFrame.from_features(data["features"])
+                    etc_gdf = etc_gdf.append(g,ignore_index=True)
+                except:
+                    json_data = json.loads(data)
+                    g = gpd.GeoDataFrame.from_features(json_data["features"])
+                    etc_gdf = etc_gdf.append(g,ignore_index=True)
+            currentET_df = etc_gdf[['Date','customerid', 'fieldassetid','ETo(in)','ETc','ETc_low']]
+            currentET_df.Date = pd.to_datetime(currentET_df.Date)
+            floatCols = ['ETo(in)','ETc','ETc_low']
+            currentET_df[floatCols] = currentET_df[floatCols].astype('float')
+            """
+            ### DEBUG
+            #print('\n\nFinal currentET_df:')
+            #print(len(currentET_df))
+            #print(currentET_df)
+            ##############
+
+
+            for dt in unique_dts:
+                endDay = dt        
+                startd = time.time()
+
+                etoDateStr =  datetime.strftime(dt,'%Y-%m-%d')
+                jsonFile = acct_dir + acctName+'__ForecastedET_'+etoDateStr+'.json'
+
+                acctGDF_date = acctGDF[acctGDF.Date==dt]
+                acctGDF_date.reset_index(drop=True, inplace=True)
+
+                print('\t\t'+etoDateStr)
+                for i,row in acctGDF_date.iterrows():
+
+                    acct = row.Category
+                    ranch = row.SubCategory
+                    field = row.Name
+                    customerid = str(row.customerid)
+                    fieldassetid = str(row.fieldassetid)
+
+                    #ETo 
+                    eto = row['ETo(in)']
+
+                    #get the last ETo, ETc and ETc_low for this assetid
+                    etdf = currentET_df[(currentET_df.customerid==customerid) &
+                                        (currentET_df.fieldassetid==fieldassetid)]
+                    etdf.reset_index(drop=True, inplace=True)
+                    lastETo = etdf['ETo(in)'][0]
+                    lastETc = etdf.ETc[0]
+                    lastETc_low = etdf.ETc_low[0]
+
+                    eto_ratio = eto / lastETo
+                    ETc_prorated = eto_ratio * lastETc
+                    ETc_low_prorated = eto_ratio * lastETc_low
+
+                    #print([customerid, fieldassetid, eto, lastETo, ETc_prorated, ETc_low_prorated])
+                    acctGDF_date.loc[i,'EToRatio']=eto_ratio
+                    acctGDF_date.loc[i,'ETc']=ETc_prorated
+                    acctGDF_date.loc[i,'ETc_low']=ETc_low_prorated
+
+                acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+                print(acctGDF_date.ETc.tolist())
+
+                #save the values
+                acctGDF_date['SentinelFootprint'] = acctGDF_date['SentinelFootprint'].astype('str')
+                acctGDF_date['LandsatFootprint'] = acctGDF_date['LandsatFootprint'].astype('str')
+                acctGDF_date['Date'] = acctGDF_date['Date'].astype('str')
+                acctGDF_date.drop('CentroidPoint',inplace=True, axis=1)
+                acctGDF_date.to_file(jsonFile, driver = 'GeoJSON')
+
+            print("\tEND --- %s seconds ---" % (time.time() - starta))
+            print('\tDone!')
+        else:
+            print('No historical data for Acct: '+str(a))
+            continue
+        #except:
+        #	print('Exception in Acct: '+str(a))
+        #	continue
+
+    print("\nEND --- %s seconds ---" % (time.time() - startt))
+    return
+
+def makeTrendChart_Unif(a_gdf):
+    #a_gdf is the valid dataframe for a SINGLE assetid
+    #try:
+
+    customerid = pd.unique(a_gdf.customerid).tolist()[0]
+    fieldassetid = pd.unique(a_gdf.fieldassetid).tolist()[0]
+    repDtStr = datetime.strftime(datetime.strptime(max(a_gdf.Date), '%Y-%m-%d %H:%M:%S'), '%Y-%m-%d')
+
+    unif_df = a_gdf[['Date','ET_unif']]
+    unif_df.Date = pd.to_datetime(unif_df.Date)
+    unif_df.set_index('Date', drop=True, inplace=True)
+
+    unif_weekly_df = unif_df.resample('W').mean()
+    unif_weekly_df.reset_index(inplace=True)
+    slope, intercept, r_value, p_value, std_err = stats.linregress(unif_weekly_df.index,unif_weekly_df.ET_unif)
+    chgPercent = ((((((slope)*(len(unif_weekly_df)-1) + intercept) - intercept)/(intercept))*100)/(len(unif_weekly_df)-1)).round(2)
+    #slopePercent = (slope*100).round(2)
+    slopePercent = round(slope*100,2)
+    r_value = round(r_value,2)
+    std_err = round(std_err,2)
+    chgPercent = round(chgPercent,2)
+    titleStr = 'Percent Slope:'+str(slopePercent)+'%'+', R'+'2'.translate(trans)+' Value:'+str(r_value)+', Std. Error:'+str(std_err)+', Avg. Weekly %Change:'+str(chgPercent)+'%'
+    fig = px.scatter(unif_weekly_df, x="Date", y="ET_unif", trendline="ols")
+    fig.update_yaxes(title_text='<b>ETc Uniformity%</b>')
+    fig.update_layout(title=titleStr)
+
+    outFile = tmpDir+str(customerid)+'_'+str(fieldassetid)+'__UniformityTrend_'+repDtStr+'.html'
+    plotly.offline.plot(fig, filename=outFile, auto_open=False)
+
+    of = outFile
+    kpi = chgPercent
+
+    #except:
+    #    print('Exception in makeTrendChart_Unif()')
+    #    of = []
+
+    return of, kpi
+
+def makeTrendChart_Unif_PAG(a_gdf):
+    #a_gdf is the valid dataframe for a SINGLE assetid
+    #try:
+
+    customerid = pd.unique(a_gdf.Category).tolist()[0]
+    fieldassetid = pd.unique(a_gdf.Name).tolist()[0]
+
+    #print(max(a_gdf.Date))
+    repDtStr = datetime.strftime(datetime.strptime(max(a_gdf.Date), '%Y-%m-%d'), '%Y-%m-%d')
+
+    unif_df = a_gdf[['Date','ET_unif']]
+    unif_df.Date = pd.to_datetime(unif_df.Date)
+    unif_df.set_index('Date', drop=True, inplace=True)
+
+    unif_weekly_df = unif_df.resample('W').mean()
+    unif_weekly_df.reset_index(inplace=True)
+    slope, intercept, r_value, p_value, std_err = stats.linregress(unif_weekly_df.index,unif_weekly_df.ET_unif)
+    chgPercent = ((((((slope)*(len(unif_weekly_df)-1) + intercept) - intercept)/(intercept))*100)/(len(unif_weekly_df)-1)).round(2)
+    #slopePercent = (slope*100).round(2)
+    slopePercent = round(slope*100,2)
+    r_value = round(r_value,2)
+    std_err = round(std_err,2)
+    chgPercent = round(chgPercent,2)
+    titleStr = 'Percent Slope:'+str(slopePercent)+'%'+', R'+'2'.translate(trans)+' Value:'+str(r_value)+', Std. Error:'+str(std_err)+', Avg. Weekly %Change:'+str(chgPercent)+'%'
+    fig = px.scatter(unif_weekly_df, x="Date", y="ET_unif", trendline="ols")
+    fig.update_yaxes(title_text='<b>ETc Uniformity%</b>')
+    fig.update_layout(title=titleStr)
+
+    outFile = tmpDir+str(customerid)+'_'+str(fieldassetid)+'__UniformityTrend_'+repDtStr+'.html'
+    plotly.offline.plot(fig, filename=outFile, auto_open=False)
+
+    of = outFile
+    kpi = chgPercent
+
+    #except:
+    #    print('Exception in makeTrendChart_Unif()')
+    #    of = []
+
+    return of, kpi
+
+"""
+def makeTrendChart_Unif(a_gdf):
+    #a_gdf is the valid dataframe for a SINGLE assetid
+    #try:
+
+    print(a_gdf.end_ts)
+
+    customerid = pd.unique(a_gdf.customerid).tolist()[0]
+    fieldassetid = pd.unique(a_gdf.fieldassetid).tolist()[0]
+    repDtStr = datetime.strftime(datetime.strptime(max(a_gdf.end_ts), '%Y-%m-%dT%H:%M:%SZ'), '%Y-%m-%d')
+
+    unif_df = a_gdf[['end_ts','etunif']]
+    unif_df.rename(columns={'end_ts':'Date','etunif':'ET_unif'}, inplace=True)
+    unif_df.Date = pd.to_datetime(unif_df.Date)
+    unif_df.ET_unif = unif_df.ET_unif.astype('float')
+    unif_df.set_index('Date', drop=True, inplace=True)
+    unif_weekly_df = unif_df.resample('W').mean()
+    unif_weekly_df.reset_index(inplace=True)
+
+    #unif_df = a_gdf[['Date','ET_unif']]
+    #unif_df.Date = pd.to_datetime(unif_df.Date)
+    #unif_df.set_index('Date', drop=True, inplace=True)
+    #unif_weekly_df = unif_df.resample('W').mean()
+
+    
+    slope, intercept, r_value, p_value, std_err = stats.linregress(unif_weekly_df.index,unif_weekly_df.ET_unif)
+    chgPercent = ((((((slope)*(len(unif_weekly_df)-1) + intercept) - intercept)/(intercept))*100)/(len(unif_weekly_df)-1)).round(2)
+
+    titleStr = 'Percent Slope:'+str(slopePercent)+'%'+', R'+'2'.translate(trans)+' Value:'+str((r_value).round(2))+', Std. Error:'+str(std_err.round(2))+', Avg. Weekly %Change:'+str(chgPercent)+'%'
+    fig = px.scatter(unif_weekly_df, x="Date", y="ET_unif", trendline="ols")
+    fig.update_layout(title=titleStr)
+    
+    outFile = tmpDir+str(customerid)+'_'+str(fieldassetid)+'__UniformityTrend_'+repDtStr+'.html'
+    plotly.offline.plot(fig, filename=outFile)
+
+    of = outFile
+    kpi = chgPercent
+    
+    #except:
+    #    print('Exception in makeFieldMap()')
+    #    of = []
+   
+    return of, kpi
+"""
+def makeTrendChart_et(at_gdf, region):
+    #a_gdf is the valid dataframe for a SINGLE assetid
+    #try:
+    
+    if region=='AUS':
+        units = ' (mm) '
+        at_gdf.ETc_average = at_gdf.ETc_average * 25.4
+    else:
+        units = ' (inches) '
+
+    customerid = pd.unique(at_gdf.customerid).tolist()[0]
+    fieldassetid = pd.unique(at_gdf.fieldassetid).tolist()[0]
+    
+    customername = pd.unique(at_gdf.customername).tolist()[0]
+    fieldname = pd.unique(at_gdf.fieldname).tolist()[0]
+    
+
+    et_df = at_gdf[['Date','ETc_average']]
+    et_df.Date = pd.to_datetime(et_df.Date)
+    et_df.ETc_average = et_df.ETc_average.astype('float')
+    repDtStr = datetime.strftime(max(et_df.Date),'%Y-%m-%d')
+    et_df.set_index('Date', drop=True, inplace=True)
+    
+    ########### Interpolate Missing Values
+    et_df = et_df.resample('D').interpolate()
+    ######################################
+
+    et_weekly_df = et_df.resample('W').sum()
+    et_weekly_df.reset_index(inplace=True)
+    et_weekly_df['ETc_cum'] = et_weekly_df['ETc_average'].cumsum()
+    
+    
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    y1_titleStr = 'ETc (average)'+units
+    y2_titleStr = 'ETc (cumulative)'+units
+    
+    meanETc = go.Scatter(
+        name=y1_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_average,
+        mode='lines+markers',
+        line=dict(color='green'),
+    )
+    cumETc = go.Bar(
+        name=y2_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_cum,
+        opacity=0.3,
+        marker_color='blue'
+    )
+    
+    fig.add_trace(meanETc,secondary_y=False)
+    fig.add_trace(cumETc,secondary_y=True)
+
+    fig.update_yaxes(title_text='<b>'+y1_titleStr+'</b>', secondary_y=False)
+    fig.update_yaxes(title_text='<b>'+y2_titleStr+'</b>', secondary_y=True)
+    fig.update_layout(title='Weekly Average and Cumulative ETc Trend For Field: '+str(fieldname))
+
+    fig.update_layout(
+    yaxis=dict(
+        titlefont=dict(color="green"),
+        tick0=0
+    ),
+    yaxis2=dict(
+        titlefont=dict(color="blue"),
+        tick0=0
+    ))
+    """
+    cumETc = go.Scatter(
+        name=y2_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_cum,
+        mode='lines+markers',
+        line=dict(color='black',dash='dashdot'),
+    )
+    
+    fig.add_trace(meanETc,secondary_y=False)
+    fig.add_trace(cumETc,secondary_y=True)
+
+    fig.update_yaxes(title_text='<b>'+y1_titleStr+'</b>', secondary_y=False)
+    fig.update_yaxes(title_text='<b>'+y2_titleStr+'</b>', secondary_y=True)
+    fig.update_layout(title='Weekly Average and Cumulative ETc Trend For Field: '+str(fieldname))
+
+    fig.update_layout(
+    yaxis=dict(
+        titlefont=dict(color="green"),
+        tick0=0
+    ),
+    yaxis2=dict(
+        titlefont=dict(color="black"),
+        tick0=0
+    ))
+    """
+        
+    outFile = tmpDir+str(customerid)+'_'+str(fieldassetid)+'__ETcTrend_'+repDtStr+'.html'
+    plotly.offline.plot(fig, filename=outFile, auto_open=False)
+
+    of = outFile
+                  
+    #except:
+    #    print('Exception in makeTrendChart_et()')
+    #    of = []
+
+    return of
+
+
+def makeTrendChart_et_PAG(at_gdf, region):
+    #a_gdf is the valid dataframe for a SINGLE assetid
+    #try:
+    
+    if region=='AUS':
+        units = ' (mm) '
+        at_gdf.ETc_average = at_gdf.ETc_average * 25.4
+    else:
+        units = ' (inches) '
+
+    #print(at_gdf)
+
+    customerid = pd.unique(at_gdf.Category).tolist()[0]
+    fieldassetid = pd.unique(at_gdf.Name).tolist()[0]
+    
+    customername = pd.unique(at_gdf.Category).tolist()[0]
+    fieldname = pd.unique(at_gdf.Name).tolist()[0]
+    
+
+    et_df = at_gdf[['Date','ETc_average']]
+    et_df.Date = pd.to_datetime(et_df.Date)
+    et_df.ETc_average = et_df.ETc_average.astype('float')
+    repDtStr = datetime.strftime(max(et_df.Date),'%Y-%m-%d')
+    et_df.set_index('Date', drop=True, inplace=True)
+    
+    ########### Interpolate Missing Values
+    et_df = et_df.resample('D').interpolate()
+    ######################################
+
+    et_weekly_df = et_df.resample('W').sum()
+    et_weekly_df.reset_index(inplace=True)
+    et_weekly_df['ETc_cum'] = et_weekly_df['ETc_average'].cumsum()
+    
+    
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    y1_titleStr = 'ETc (average)'+units
+    y2_titleStr = 'ETc (cumulative)'+units
+    
+    meanETc = go.Scatter(
+        name=y1_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_average,
+        mode='lines+markers',
+        line=dict(color='green'),
+    )
+    cumETc = go.Bar(
+        name=y2_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_cum,
+        opacity=0.3,
+        marker_color='blue'
+    )
+    
+    fig.add_trace(meanETc,secondary_y=False)
+    fig.add_trace(cumETc,secondary_y=True)
+
+    fig.update_yaxes(title_text='<b>'+y1_titleStr+'</b>', secondary_y=False)
+    fig.update_yaxes(title_text='<b>'+y2_titleStr+'</b>', secondary_y=True)
+    fig.update_layout(title='Weekly Average and Cumulative ETc Trend For Field: '+str(fieldname))
+
+    fig.update_layout(
+    yaxis=dict(
+        titlefont=dict(color="green"),
+        tick0=0
+    ),
+    yaxis2=dict(
+        titlefont=dict(color="blue"),
+        tick0=0
+    ))
+    """
+    cumETc = go.Scatter(
+        name=y2_titleStr,
+        x=et_weekly_df.Date,
+        y=et_weekly_df.ETc_cum,
+        mode='lines+markers',
+        line=dict(color='black',dash='dashdot'),
+    )
+    
+    fig.add_trace(meanETc,secondary_y=False)
+    fig.add_trace(cumETc,secondary_y=True)
+
+    fig.update_yaxes(title_text='<b>'+y1_titleStr+'</b>', secondary_y=False)
+    fig.update_yaxes(title_text='<b>'+y2_titleStr+'</b>', secondary_y=True)
+    fig.update_layout(title='Weekly Average and Cumulative ETc Trend For Field: '+str(fieldname))
+
+    fig.update_layout(
+    yaxis=dict(
+        titlefont=dict(color="green"),
+        tick0=0
+    ),
+    yaxis2=dict(
+        titlefont=dict(color="black"),
+        tick0=0
+    ))
+    """
+        
+    outFile = tmpDir+str(customerid)+'_'+str(fieldassetid)+'__ETcTrend_'+repDtStr+'.html'
+    plotly.offline.plot(fig, filename=outFile, auto_open=False)
+
+    of = outFile
+                  
+    #except:
+    #    print('Exception in makeTrendChart_et()')
+    #    of = []
+
+    return of
+
+def getHTMLLinkToChart(htmlFile, kpi):
+    
+    file_path = Path(htmlFile)
+
+    if float(kpi) < 0:
+        stl = ' style=\"color:#FF0000;\" '
+        sn = ''
+    else:
+        stl = ' style=\"color:#000000;\" '
+        sn='+'
+
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<a href=\"'+linkURL+'\"'+stl+'>'+str(sn)+str(kpi)+'%</a>'  
+    
+    return linkStr
+
+
+def getHTMLLinkToETcChart(htmlFile, kpi):
+    
+    file_path = Path(htmlFile)
+
+    if float(kpi) < 0:
+        stl = ' style=\"color:#FF0000;\" '
+    else:
+        stl = ' style=\"color:#000000;\" '
+
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    linkStr = '<a href=\"'+linkURL+'\"'+stl+'>'+str(kpi)+'</a>'  
+    
+    return linkStr
+
+def writeActiveFilesToJSONConfigFiles(gdf_AllJLAccts):
+
+    activeFields_df = gdf_AllJLAccts[['customerid','customername','fieldassetid',
+           'fieldname', 'monitored', 'subscribedhypergrow', 'subscribedhyperview']]
+    list_of_HG_activeCustomerids = pd.unique(activeFields_df[activeFields_df.subscribedhypergrow==True].customerid).tolist()
+    list_of_HG_activeCustomerids.sort()
+
+    list_of_HV_activeCustomerids = pd.unique(activeFields_df[activeFields_df.subscribedhyperview==True].customerid).tolist()
+    list_of_HV_activeCustomerids.sort()
+
+    for customerid in list_of_HG_activeCustomerids:
+        activeJsonFile = acctConfigPath + 'JainlogicCustomerid_'+str(customerid)+'/JainlogicCustomerid_'+str(customerid)+'__HG_activeFieldsConfig.json'
+
+        df = activeFields_df[activeFields_df.customerid==customerid]
+        dff = df[df.subscribedhypergrow==True]
+        dff.reset_index(drop=True, inplace=True)
+        #Write to the json file if the dff is > 0
+        if len(dff)>0:
+            #Make the directory of it doesn't exists
+            if not os.path.exists(acctConfigPath + 'JainlogicCustomerid_'+str(customerid)):
+                os.makedirs(acctConfigPath + 'JainlogicCustomerid_'+str(customerid));
+            dff.to_json(activeJsonFile)
+        else:
+            print('\nNo active HG fields in customerid = '+str(customerid))
+
+        
+    for customerid in list_of_HV_activeCustomerids:
+        activeJsonFile = acctConfigPath + 'JainlogicCustomerid_'+str(customerid)+'/JainlogicCustomerid_'+str(customerid)+'__HV_activeFieldsConfig.json'
+
+        df = activeFields_df[activeFields_df.customerid==customerid]
+        dff = df[df.subscribedhyperview==True]
+        dff.reset_index(drop=True, inplace=True)
+
+        #Write to the json file if the dff is > 0
+        if len(dff)>0:
+            #Make the directory of it doesn't exists
+            if not os.path.exists(acctConfigPath + 'JainlogicCustomerid_'+str(customerid)):
+                os.makedirs(acctConfigPath + 'JainlogicCustomerid_'+str(customerid));
+            dff.to_json(activeJsonFile)
+        else:
+            print('\nNo active HV fields in customerid = '+str(customerid))
+
+    return
+
+def normalizeCustomerName(acct_gdf):
+
+    normalized_acct_gdf = acct_gdf.copy()
+
+    if "customername" in normalized_acct_gdf.columns:
+        list_of_customernames = pd.unique(normalized_acct_gdf.customername)
+        num_of_customernames = len(list_of_customernames)
+        max_len=0;
+        cname=''
+        if num_of_customernames >= 2:
+            for c in list_of_customernames:
+                a_gdf = normalized_acct_gdf[normalized_acct_gdf.customername==c]
+                if len(a_gdf)>=max_len:
+                    max_len=len(a_gdf)
+                    cname = c
+                else:
+                    continue
+            normalized_acct_gdf.customername=cname
+    elif "Ranch" in normalized_acct_gdf.columns:
+        list_of_customernames = pd.unique(normalized_acct_gdf.Ranch)
+        num_of_customernames = len(list_of_customernames)
+        max_len=0;
+        cname=''
+        if num_of_customernames >= 2:
+            for c in list_of_customernames:
+                a_gdf = normalized_acct_gdf[normalized_acct_gdf.Ranch==c]
+                if len(a_gdf)>=max_len:
+                    max_len=len(a_gdf)
+                    cname = c
+                else:
+                    continue
+            normalized_acct_gdf.Ranch=cname
+
+    return normalized_acct_gdf
+
+
+def interpolateAndOverWriteNaNs(a_gdf, startDtStr, endDtStr):
+    #returns a corrected DataFrame if NaNs are detected in any of the fields data
+    #returns empty dataframe if no NaNs are detected
+
+    list_of_accts = pd.unique(a_gdf.customerid).tolist()
+    list_of_accts.sort()
+    acct = list_of_accts[0] # Just do the first acct in this dataframe
+
+    acct = str(acct)
+    flag=0
+
+    acct_gdf = a_gdf.copy()
+
+    #Now read the ET Files
+    startDt = datetime.strptime(startDtStr, '%Y-%m-%d')
+    endDt = datetime.strptime(endDtStr, '%Y-%m-%d')
+    etDataDir = acctOutputPath + 'JainlogicCustomerid_'+acct+'/data/'
+
+    acctData_gdf = gpd.GeoDataFrame()
+    list_of_etFiles=[]
+    list_of_etFilesWithoutRoot = []
+    list_of_dtStrs = [datetime.strftime(x, '%Y-%m-%d') for x in pd.date_range(startDt,endDt-timedelta(days=1),freq='d')]
+    for dtStr in list_of_dtStrs:
+        etFile = etDataDir + 'JAINLOGICCUSTOMERID_'+acct+'__ET_'+dtStr+'.json'
+        list_of_etFiles.append(etFile)
+        gdf = gpd.read_file(etFile)
+        acctData_gdf = acctData_gdf.append(gdf,ignore_index=True)
+
+
+    list_of_fids = pd.unique(acctData_gdf.fieldassetid)
+    list_of_fids.sort()
+
+    new_acctData_gdf = gpd.GeoDataFrame()
+
+    for fid in list_of_fids:
+        a_gdf = acctData_gdf[acctData_gdf.fieldassetid==fid]
+        a_gdf.reset_index(drop=True, inplace=True)
+        keepCols=['Date','ETc', 'ETc_low', 'Kc', 'ETm', 'ET_p90', 'ET_unif']
+        asub_gdf = a_gdf[keepCols]
+
+        # Print the number of NaN entries
+        nan_count = asub_gdf['ETc'].isna().sum()
+        if nan_count>0:
+            print('\n\tFound %s NaNs in Acct %s, field: %s' % (str(nan_count), str(acct), str(fid)))
+            asub_gdf.Date = pd.to_datetime(asub_gdf.Date)
+            asub_gdf = asub_gdf.set_index('Date')
+            aint_gdf = asub_gdf.interpolate(method='linear', limit_direction='both', axis=0)
+            #resample('D').interpolate(method='linear', limit_direction='both', axis=0)
+            aint_gdf.reset_index(inplace=True)
+            a_gdf[keepCols]=aint_gdf.copy()
+            print('\tFixed. New DF has %s NaNs' % (a_gdf['ETc'].isna().sum()))
+            flag=1
+        new_acctData_gdf = new_acctData_gdf.append(a_gdf, ignore_index=True)
+
+    if flag==1:
+        return new_acctData_gdf, list_of_etFiles
+    else:
+        return pd.DataFrame(), []
+def getEToForStnList(obs_latest_gdf, list_of_stns):
+
+    allETo_gdf = gpd.GeoDataFrame()
+    minElements = ['TT','TN1','TX1']
+    for stn in list_of_stns:
+        obs_gdf = obs_latest_gdf[obs_latest_gdf.StationNumber==stn]
+        obs_gdf.reset_index(drop=True, inplace=True)
+        obs_gdf.ParameterValue=obs_gdf.ParameterValue.astype('float')
+        list_of_elements = pd.unique(obs_gdf.ParameterShortName).tolist()
+    
+        if set(minElements).issubset(list_of_elements): #make sure they are in there
+            ######### Process the ETo
+            obs_gdf = obs_gdf.dropna()
+            obs_gdf.reset_index(drop=True, inplace=True)
+            et1 = ETo()
+            freq = 'D'
+            lat=float(obs_gdf.StationLatitude[0])
+            lon=float(obs_gdf.StationLongitude[0])
+            z_msl=float(float(obs_gdf.StationHeight[0]))
+
+            #Pivot for a flat Datastructure
+            allCols = ['Date', 'StationName', 'StationNumber','ParameterShortName','ParameterFullName', 'ParameterValue', 'ParameterUnits']
+            obs_df = obs_gdf[allCols]
+            obs_df['Date'] = pd.to_datetime(obs_df['Date']).apply(lambda x: x.strftime('%Y-%m-%dT%H%M%S'))
+            print('\tComputing ETo for stn '+str(stn))
+            tt = pd.pivot_table(obs_df, values='ParameterValue', index=['Date'], columns=['ParameterShortName'], aggfunc=np.mean)
+            tt.index = pd.to_datetime(tt.index)
+            o_df = tt.resample('H').interpolate(method='linear', limit_direction='both')
+
+            colsToDivideBy10 = tt.columns.tolist()
+            colsToDivideBy10.remove('RH')
+            o_df[colsToDivideBy10] = o_df[colsToDivideBy10]/10
+            
+            
+            o_df['StnID']=obs_gdf['StationNumber'][0]
+            o_df['lat']=lat
+            o_df['lon']=lon
+            o_df['elev']=z_msl
+            o_df['desc']=obs_gdf['StationName'][0]
+            o_df['geometry']=obs_gdf.geometry[0]
+            
+            set0 = ['TT','TN1','TX1','RH','FF','TD', 'P0']
+            set1 = ['TT','TN1','TX1','RH','FF','TD']
+            set2 = ['TT','TN1','TX1','RH','TD']
+            set3 = ['TT','TN1','TX1']
+
+            if all(elem in o_df.columns.tolist()  for elem in set0):
+                p_df = o_df[set0]
+                p_df.reset_index(drop=False, inplace=True)
+                p_df['P0']=p_df['P0']/10
+                
+                eto_cols = ['TS','T_mean','T_min','T_max', 'RH_mean','U_z','T_dew', 'P']
+                p_df.columns=eto_cols
+                p_df.set_index('TS',drop=True, inplace=True)
+                p_df.index.name='date'
+                p_df = p_df.astype('float')
+
+            if all(elem in o_df.columns.tolist()  for elem in set1):
+                p_df = o_df[set1]
+                p_df.reset_index(drop=False, inplace=True)
+
+                eto_cols = ['TS','T_mean','T_min','T_max', 'RH_mean','U_z','T_dew']
+                p_df.columns=eto_cols
+                p_df.set_index('TS',drop=True, inplace=True)
+                p_df.index.name='date'
+                p_df = p_df.astype('float')
+
+            elif all(elem in o_df.columns.tolist()  for elem in set2):
+                p_df = o_df[set2]
+                p_df.reset_index(drop=False, inplace=True)
+
+                eto_cols = ['TS','T_mean','T_min','T_max', 'RH_mean','T_dew']
+                p_df.columns=eto_cols
+                p_df.set_index('TS',drop=True, inplace=True)
+                p_df.index.name='date'
+                p_df = p_df.astype('float')
+            elif all(elem in o_df.columns.tolist()  for elem in set3):
+                p_df = o_df[set3]
+                p_df.reset_index(drop=False, inplace=True)
+
+                eto_cols = ['TS','T_mean','T_min','T_max']
+                p_df.columns=eto_cols
+                p_df.set_index('TS',drop=True, inplace=True)
+                p_df.index.name='date'
+                p_df = p_df.astype('float')
+
+            else:
+                break
+            
+            et1.param_est(p_df,freq,z_msl,lat,lon)
+            res_df = et1.ts_param
+            Rn=float(res_df.R_n[0]) #Net radiation (MJ/m2)
+            Rs=float(res_df.R_s[0]) #Incoming shortwave radiation (MJ/m2)
+
+            eto1 = et1.eto_fao()
+            eto2 = et1.eto_hargreaves()
+
+            o_df['ETo_FAO_MM'] = eto1
+            o_df['ETo_HAR_MM'] = eto2
+            o_df['ETo_AVG_MM'] = (eto1 + eto2)/2
+            
+            #print([eto1, eto2])
+            
+            # set other parameters
+            
+            utc_time_list = [x for x in eto1.index.tolist()]
+            local_time_list = getLocalTime(utc_time_list, lon)
+            aifstime_utc = [datetime.strftime(x, '%Y%m%d%H%M%S') for x in utc_time_list]
+            local_date_time_full = [datetime.strftime(x, '%Y%m%d%H%M%S') for x in local_time_list]
+            o_df["aifstime_utc"] = aifstime_utc
+            o_df['local_date_time_full'] = local_date_time_full
+            
+        
+            o_gdf = gpd.GeoDataFrame(o_df, geometry=o_df.geometry)
+
+            o_gdf.reset_index(inplace=True, drop=True)
+            
+            allETo_gdf = allETo_gdf.append(o_gdf, ignore_index=True)
+            
+    return allETo_gdf
+
+def getLocalTime(utc, longitude):
+    """
+    :param utc list: string Ex. '2008-12-2'
+    :param longitude: longitude
+    :return: Local Mean Time Timestamp
+    """
+    lmt = [x + timedelta(seconds=round(4*60*longitude)) for x in utc]
+    lmt = [x.replace(tzinfo=None) for x in lmt]
+    return lmt   
+
+
+
+
+def type_py2sql(pytype):
+    '''Return the closest sql type for a given python type'''
+    if pytype in _type_py2sql_dict:
+        return _type_py2sql_dict[pytype]
+    else:
+        raise NotImplementedError(
+            "You may add custom `sqltype` to `"+str(pytype)+"` assignment in `_type_py2sql_dict`.")
+
+
+def insertDF(gdf, dbname):
+    #connect to the PostgreSQL DB
+    hostname = 'localhost'
+    username = 'agls_admin'
+    passwd = 'Pass1234'
+    database = dbname
+    #'agls'
+    port = '5432'
+    host='127.0.0.1'
+
+    #2. Create a table and insert into that table
+    #TO PUT DATA
+    cmdStr = 'postgresql+psycopg2://'+username+':'+passwd+'@'+hostname+':'+port+'/'+database
+    engine = create_engine(cmdStr)
+    conn = engine.raw_connection()
+    cur = conn.cursor()
+
+    writeType = 'replace'
+    indexType=False
+    geomType='POLYGON'
+    geomCol = 'geom'
+
+    # make the insert
+    gdf.to_sql(name=dbname, 
+                    con=engine, if_exists=writeType, index=indexType,
+                    dtype={geomCol: Geometry(geomType, srid= 4326)})
+    conn.close()
+
+    return
+def parse_point(record):
+>>>>>>> Rajat
     pieces = record.split() # splits each record into a list of 3
     x = float(pieces[2].lstrip('(')) # latitude
     y = float(pieces[3].rstrip('')) # longitude 
     z = float(pieces[4].rstrip(')')) # elevation 
+<<<<<<< HEAD
     point = [x,y,z] # convert to coordinates 
     return point
 
@@ -26855,6 +30884,180 @@ def getEToForArchiveObs(region_gdf):
         
         
     return allETo_gdf
+=======
+    point = Point(x,y,z) # convert to Shapely Point
+    return point
+
+def unparse_point(record):
+    pieces = record.split() # splits each record into a list of 3
+    x = float(pieces[2].lstrip('(')) # latitude
+    y = float(pieces[3].rstrip('')) # longitude 
+    z = float(pieces[4].rstrip(')')) # elevation 
+    point = [x,y,z] # convert to coordinates 
+    return point
+
+def getNDates(N):
+    startDtStr = datetime.strftime(datetime.now()-timedelta(days=N),'%Y-%m-%dT00:00:00+00:00')
+    endDtStr = datetime.strftime(datetime.now()-timedelta(days=0), '%Y-%m-%dT00:00:00+00:00')
+
+    #Put the URL replacements
+    startDtStrN = startDtStr.replace(':','%3A').replace('+','%2B')
+    endDtStrN = endDtStr.replace(':','%3A').replace('+','%2B')
+    
+    return [startDtStrN,endDtStrN]
+
+def getDates():
+    startDtStr = datetime.strftime(datetime.now()-timedelta(days=1),'%Y-%m-%dT00:00:00+00:00')
+    endDtStr = datetime.strftime(datetime.now()-timedelta(days=0), '%Y-%m-%dT00:00:00+00:00')
+
+    #Put the URL replacements
+    startDtStrN = startDtStr.replace(':','%3A').replace('+','%2B')
+    endDtStrN = endDtStr.replace(':','%3A').replace('+','%2B')
+    
+    return [startDtStrN,endDtStrN]
+
+def getWeatherCols(obsData_gdf, weather_cols):
+    for i,row in obsData_gdf.iterrows():
+        for metric in weather_cols:
+            colDict = row[metric]
+            if type(colDict)==float:
+                v=np.nan
+                continue
+            else:
+                val = colDict['value']
+                if val:
+                    v = val
+                else:
+                    v = np.nan          
+
+                colHeader = metric+'__'+colDict['unitCode'].split(':')[-1]
+                obsData_gdf.loc[i,colHeader] = v
+                
+    return obsData_gdf
+
+def getIFRAMELinkTo(htmlFile,metricStr):
+    file_path = Path(htmlFile)
+    linkURL='https://www.agralogics.com/HyperGrow/'+file_path.name
+    return linkURL
+
+def getIFRAMELinkToWithFolder(folder, htmlFile,metricStr):
+    file_path = Path(htmlFile)
+    linkURL='https://www.agralogics.com/'+folder+'/'+file_path.name
+    return linkURL
+
+
+def fixZinPolygon(poly):
+    coordsList = [[poly.exterior.xy[0][x],poly.exterior.xy[1][x]] for x in range(0,len(poly.exterior.xy[0]))]
+    new_poly = shapely.geometry.Polygon(coordsList)
+    return new_poly
+
+
+def logDtMISMatchErrors(acct, startDtStr, endDtStr, listOfJsonFiles, listOfJsonDts, errLogFile):
+    
+    startDt = datetime.strptime(startDtStr,'%Y-%m-%d')
+    endDt = datetime.strptime(endDtStr,'%Y-%m-%d')
+    
+    errStr = '\n\n'+str(datetime.now())
+    if ((min(listOfJsonDts) != startDt) | (max(listOfJsonDts) !=endDt) | (len(listOfJsonFiles) != 7)):
+        errStr += '\nET Error in Acct: '+acct
+        if (min(listOfJsonDts) != startDt):
+            errStr += '\nReport Start Date and ET JSON Start Date are not identifcal !!'
+            errStr += '\nReport Start Date: '+startDtStr+', ET JSON start date: '+datetime.strftime(min(listOfJsonDts), '%Y-%m-%d')
+        elif (max(listOfJsonDts) != endDt):
+            errStr += '\nReport End Date and ET JSON End Date are not identifcal !!'
+            errStr += '\nReport End Date: '+endDtStr+', ET JSON End Date: '+datetime.strftime(max(listOfJsonDts), '%Y-%m-%d')
+        elif len(listOfJsonFiles) != 7:
+            errStr += '\nnot enough Jsons for a whole week'
+            errStr += '\nNo of Json Files: '+str(len(listOfJsonFiles))
+    else:
+        errStr += '\nET Data Dt Check for Acct '+str(a)+'for Period=['+startDtStr+' - '+endDtStr+'] ...OK'
+        
+        
+    with open(errLogFile, 'a') as errLog:
+            errLog.write(errStr)
+            
+    return
+
+def get_s2_cellids_and_token_list(resLevel, lats, lons):
+    min_level=resLevel
+    max_level=resLevel
+    r = s2.RegionCoverer()
+    r.min_level = min_level
+    r.max_level = max_level
+    lb_lat = min(lats)
+    ub_lat = max(lats)
+    lb_lon = min(lons)
+    ub_lon = max(lons)
+    lb = s2.LatLng.from_degrees(lb_lat, lb_lon)
+    ub = s2.LatLng.from_degrees(ub_lat, ub_lon)
+    cids = r.get_covering(s2.LatLngRect.from_point_pair(lb,ub))
+    s2_token_list = []
+    for cellid in cids:
+        s2_token_list.append(cellid.to_token())
+    return s2_token_list, cids
+
+def getEToForArchiveObs(region_gdf):
+    
+    #get a list of all stns
+    list_of_stns = pd.unique(region_gdf.STATION).tolist()
+    list_of_stns.sort()
+    
+    allETo_gdf = gpd.GeoDataFrame()
+    
+    for StnID in list_of_stns:
+        print(StnID)
+        obs_gdf = region_gdf[region_gdf.STATION==StnID]
+        obs_gdf.reset_index(drop=True, inplace=True)
+        
+        obs_df = pd.DataFrame(obs_gdf)
+        
+        #Select the columns
+        keepCols = ['DATE', 'TEMP', 'MIN', 'MAX', 'DEWP', 'STP', 'WDSP']
+        o_df = obs_df[keepCols]
+        
+        #Rename the columns
+        o_df = o_df.rename(columns={
+            'DATE': 'date',
+            'TEMP': 'T_mean',
+            'MIN': 'T_min',
+            'MAX': 'T_max',
+            'DEWP': 'T_dew',
+            'STP': 'P',
+            'WDSP': 'U_z',
+        })
+        #Correct the units
+        o_df['T_mean'] = (5/9) * (o_df['T_mean'] - 32) 
+        o_df['T_min'] = (5/9) * (o_df['T_min'] - 32)
+        o_df['T_max'] = (5/9) * (o_df['T_max'] - 32)
+        o_df['T_dew'] = (5/9) * (o_df['T_dew'] - 32)
+        o_df['P'] = 0.1 * o_df['P'] #convert mbar to kpa
+        o_df['U_z'] = 0.514444 * o_df['U_z'] #convert to mps
+        
+        #set the date
+        o_df.set_index('date',drop=True, inplace=True)
+        o_df = o_df.astype('float')
+            
+        #setup the array
+        et1 = ETo()
+        freq = 'D'
+        lat = obs_df.LATITUDE[0]
+        lon = obs_df.LONGITUDE[0]
+        z_msl = obs_df.ELEVATION[0]
+        geom = obs_df.geometry[0]
+        
+        
+        et1.param_est(o_df,freq,z_msl,lat,lon)
+        res_df = et1.ts_param
+        Rn=float(res_df.R_n[0]) #Net radiation (MJ/m2)
+        Rs=float(res_df.R_s[0]) #Incoming shortwave radiation (MJ/m2)
+
+        eto1 = et1.eto_fao()
+        eto2 = et1.eto_hargreaves()
+
+        o_df['ETo_FAO_MM'] = eto1
+        o_df['ETo_HAR_MM'] = eto2
+        o_df['ETo_AVG_MM'] = (eto1 + eto2)/2
+>>>>>>> Rajat
 
 import time
 
@@ -26984,125 +31187,45 @@ def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
     
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    list_of_L5_paths = []
+    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+    
+    # print(s2_index__L5_list)
+    # print(s2_index__L7_list)
+    # print(s2_index__L9_list)
 
+    list_of_L5_paths = []
+    list_of_L7_paths = []
+    list_of_L9_paths = []
+    
     list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
                         if os.path.exists(filePath+'s2_token_L5='+x)]
     
     weather_datasets = []
+        
     for x in list_of_L5_paths:
         weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     
     #get the Data
     w_all = pd.DataFrame()
-    try:
+    for weatherDataset in weather_datasets:
+        """
+        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+        if os.path.exists(dataPath):
+            dataDir = dataPath
+        else:
+            dataDir = []
+            return []
         
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
+        #get the parquet dataset from the directory
+        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        
+        dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
+        try:
             
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            
-            dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
-
             weather_df = weatherDataset.to_table(
                 columns=['Year','Month','Day','ETo_AVG_IN'],
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()      
-            
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
-
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
-
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-            w_df['Date']=dt
-
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        print(e)
-            
-        
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
-    else:
-        w_ret = pd.DataFrame()
-
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
-    return  w_ret
-
-def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
-    lats = [lat]
-    lons = [lon]
-    start_time = time.time()
-
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
-        
-    list_of_L5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list if os.path.exists(filePath + 's2_token_L5=' + x)]
-
-    weather_datasets = []
-    for x in list_of_L5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-
-    # Get the data
-    w_all = pd.DataFrame()
-    try:
-        for weatherDataset in weather_datasets:
-            # List the columns available in the dataset to identify the correct field name
-            # print(f"Columns in dataset: {weatherDataset.schema}")
-            
-            yrStr = YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-
-            dt = datetime.strptime(yrStr + '-' + moStr + '-' + dtStr, '%Y-%m-%d')
-
-            # Adjust the field name to match the actual column names in the dataset
-            weather_df = weatherDataset.to_table(
-                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN'],  # Correct column name here
                 filter=(
                     (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
                     (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
@@ -27119,36 +31242,223 @@ def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
             weather_df.Date = pd.to_datetime(weather_df.Date)
 
             weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-                    # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
-            
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
-                continue
-            
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
             w_df['Date']=dt
 
             cols = ['Date','ETo_AVG_IN']
             w_df = w_df[cols]
             w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        w_ret=pd.DataFrame()    
+            
+        except Exception as e:
+            print(e)
     
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+    if len(w_all)>0:
+        
+         try:
+            #take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
             w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
+         except Exception as e:
+            
+            w_ret=pd.DataFrame()
     else:
-        w_ret = pd.DataFrame()
+        w_ret=pd.DataFrame()
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return  w_ret
 
+def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
+    lats=[lat]
+    lons=[lon]
+    start_time = time.time()
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    
+    
+    #get the list of S2 indeces and CIDs for the data point
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    list_of_L5_paths = []
+
+    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
+                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    
+    weather_datasets = []
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    
+    #get the Data
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        """
+        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+        if os.path.exists(dataPath):
+            dataDir = dataPath
+        else:
+            dataDir = []
+            return []
+        
+        #get the parquet dataset from the directory
+        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        
+        dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
+        try:
+            
+            weather_df = weatherDataset.to_table(
+                columns=['Year','Month','Day','ETo_AVG_IN'],
+                filter=(
+                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                )
+            ).to_pandas()
+            
+        except Exception as e:
+            print(e)
+            weather_df = pd.DataFrame()
+
+        try:
+        
+            #get the DataFrame for the average of that day
+            weather_df['YYYY']=weather_df['Year'].astype(str)
+            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+            weather_df.Date = pd.to_datetime(weather_df.Date)
+
+            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+            w_df['Date']=dt
+
+            cols = ['Date','ETo_AVG_IN']
+            w_df = w_df[cols]
+            w_all = pd.concat([w_all, w_df], ignore_index=True)
+        except Exception as e:
+            print(e)
+            
+        
+    if len(w_all)>0:
+        try:
+            #take the average of the columns
+            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
+            w_ret.reset_index(inplace=True)
+        except Exception as e:
+            w_ret=pd.DataFrame()    
+    else:
+        w_ret=pd.DataFrame()
+    
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+    
+    return  w_ret
+
+def getEtoFromAUS(lat, lon, filePath,start_date,end_date):
+    lats=[lat]
+    lons=[lon]
+    start_time = time.time()
+    #get the list of S2 indeces and CIDs for the data point
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    s2_index__L5_list = ['2bd4']
+    #print(s2_index__L3_list)
+    #print(s2_index__L5_list)
+    #print(s2_index__L8_list)
+    
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    list_of_L5_paths = []
+    
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
+
+    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
+                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    
+    
+    weather_datasets = []
+        
+    for x in list_of_L5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    #get the Data
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        """
+        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+        if os.path.exists(dataPath):
+            dataDir = dataPath
+        else:
+            dataDir = []
+            return []
+        
+        #get the parquet dataset from the directory
+        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        yrStr=  YYYY_str
+        moStr = MM_str
+        dtStr = DD_str
+        
+        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+        
+            
+        weather_df = weatherDataset.to_table(
+            columns=['Year','Month','Day','ETo_AVG_IN'],
+            filter=(
+                (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+            )
+        ).to_pandas()
+
+        #get the DataFrame for the average of that day
+        weather_df['YYYY']=weather_df['Year'].astype(str)
+        weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+        weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+
+        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+        weather_df.Date = pd.to_datetime(weather_df.Date)
+
+        weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+        w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+        w_df['Date']=dt
+
+        cols = ['Date','ETo_AVG_IN']
+        w_df = w_df[cols]
+        w_all = pd.concat([w_all, w_df], ignore_index=True)
+            
+
+    
+    if len(w_all)>0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        #take the average of the columns
+        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
+        w_ret.reset_index(inplace=True)
+    else:
+        w_ret=pd.DataFrame()
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -27163,7 +31473,7 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
     
     #print(s2_index__L3_list)
-    # print(f'AUS Forecast--{s2_index__L5_list}')
+    print(f's2_index__L5_list--{s2_index__L5_list}')
     #print(s2_index__L8_list)
     
     tok = start_date.split('-')
@@ -27194,28 +31504,29 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     for x in list_of_L5_paths:
         weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     #get the Data
-    try:
-        w_all = pd.DataFrame()
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        """
+        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+        if os.path.exists(dataPath):
+            dataDir = dataPath
+        else:
+            dataDir = []
+            return []
+        
+        #get the parquet dataset from the directory
+        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+        """
+        yrStr=  YYYY_str
+        moStr = MM_str
+        dtStr = DD_str
+        
+        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+        
+        try:
             
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            yrStr=  YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-            
-            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-                
             weather_df = weatherDataset.to_table(
-                columns=['Year','Month','Day','ETo_average_inches'],
+                columns=['Year','Month','Day','ETo_AVG_IN'],
                 filter=(
                     (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
                     (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
@@ -27235,26 +31546,20 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
             w_df = pd.DataFrame(weather_df.mean(axis=0)).T
             w_df['Date']=dt
 
-            cols = ['Date','ETo_average_inches']
+            cols = ['Date','ETo_AVG_IN']
             w_df = w_df[cols]
             w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        w_ret=pd.DataFrame()
-
+        except  Exception as e:
+            print(e)
         
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
+    
+    if len(w_all)>0:
+        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+        #take the average of the columns
+        w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].sum())
+        w_ret.reset_index(inplace=True)
     else:
-        w_ret = pd.DataFrame()
-
+        w_ret=pd.DataFrame()
     
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -27262,230 +31567,6 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     return w_ret
 
 def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
-    lats=[lat]
-    lons=[lon]
-    start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
-    
-    #print(s2_index__L3_list)
-    # print(f'NOAA DAily-{s2_index__L3_list}')
-    #print(s2_index__L8_list)
-    
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-    
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
-
-    list_of_L3_paths = []
-    
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
-
-    list_of_L3_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
-                        if os.path.exists(filePath+'s2_index__L3='+x)]
-    
-    
-    weather_datasets = []
-        
-    for x in list_of_L3_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-    #get the Data
-    w_all = pd.DataFrame()
-    try:
-        
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
-            
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            yrStr=  YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-            
-            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-
-                
-            weather_df = weatherDataset.to_table(
-                columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN'],  # Use the correct column name
-                filter=(
-                    (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= int(end_YYYY_str)) &
-                    (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= int(end_MM_str)) &
-                    (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= int(end_DD_str))
-                )
-            ).to_pandas()
-
-
-            # #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['YYYY'].astype(str)
-            weather_df['MM']=weather_df['MM'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['DD'].astype(str).str.zfill(2)
-
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
-
-            # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
-            
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
-                continue
-            w_df['Date']=dt
-
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        w_ret = pd.DataFrame()
-    
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
-    else:
-        w_ret = pd.DataFrame()
-
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
-    return w_ret
-    
-
-def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
-    lats=[lat]
-    lons=[lon]
-    start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-
-    #print(s2_index__L3_list)
-    # print(f'NOAA Forecast-{s2_index__L5_list}')
-    #print(s2_index__L8_list)
-    
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-    
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
-
-
-    list_of_L5_paths = []    
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
-
-    list_of_L5_paths = [filePath+'s2_tokens_l5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_tokens_l5='+x)]
-    
-    weather_datasets = []
-    for x in list_of_L5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-    #get the Data
-    w_all = pd.DataFrame()
-    try:
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
-            
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            yrStr=  YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-            
-            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-
-                
-            weather_df = weatherDataset.to_table(
-                columns=['Year', 'Month', 'Day', 'ETo_average_inches'],  # Use the correct column name
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= int(end_YYYY_str)) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= int(end_MM_str)) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= int(end_DD_str))
-                )
-            ).to_pandas()
-
-
-
-            # #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
-
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
-
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-            w_df['Date']=dt
-            # print(w_df.columns)
-            cols = ['Date','ETo_average_inches']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-    except Exception as e:
-        w_ret = pd.DataFrame()     
-        
-        
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_average_inches'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
-    else:
-        w_ret = pd.DataFrame()
-
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-
-    return w_ret
-
-
-def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
     lats=[lat]
     lons=[lon]
     
@@ -27662,8 +31743,11 @@ def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
         weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
         weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
 
-        weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-        weather_df.Date = pd.to_datetime(weather_df.Date)
+    # print(s2_index__L5_list)
+    # print(s2_index__L7_list)
+    # print(s2_index__L9_list)
+    # s2_index__L7_list = ['8099c']
+    # s2_index__L9_list = ['8099bc']
 
         weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
         # Convert HlyEto to numeric (handle coercion)
@@ -27999,7 +32083,6 @@ def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
 
 os.environ['ASSET_REGISTRY_BASE_URL'] = 'https://api-ar.agstack.org/'
 from shapely import wkt
-
 def fetchWKT(geoid):
     """
     Fetch the Well-Known Text (WKT) representation of a polygon for a given geoid.

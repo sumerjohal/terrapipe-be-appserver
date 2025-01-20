@@ -2172,6 +2172,24 @@ def get_eto_data_description():
 
 
 def get_satelite_stats_metadata():
+<<<<<<< HEAD
+
+    metadata = {
+            "10th_prctile": "dimensionless",
+            "25th_prctile": "dimensionless",
+            "5th_prctile": "dimensionless",
+            "75th_prctile": "dimensionless",
+            "90th_prctile": "dimensionless",
+            "95th_prctile": "dimensionless",
+            "date": "datetime (GMT)",
+            "avg": "dimensionless",
+            "max": "dimensionless",
+            "median": "dimensionless",
+            "min": "dimensionless",
+            "stddev": "dimensionless"
+        }
+=======
+>>>>>>> Rajat
 
     metadata = {
             "10th_prctile": "dimensionless",
@@ -2188,6 +2206,198 @@ def get_satelite_stats_metadata():
             "stddev": "dimensionless"
         }
 
+<<<<<<< HEAD
+    return metadata
+
+
+def get_satelite_desc():
+    
+    satelite_metadata_descriptions = {
+        "10th_prctile": "10th percentile value of NDVI data",
+        "25th_prctile": "25th percentile value of NDVI data",
+        "5th_prctile": "5th percentile value of NDVI data",
+        "75th_prctile": "75th percentile value of NDVI data",
+        "90th_prctile": "90th percentile value of NDVI data",
+        "95th_prctile": "95th percentile value of NDVI data",
+        "date": "Date of data observation in GMT",
+        "avg": "Average value of NDVI data",
+        "max": "Maximum value of NDVI data",
+        "median": "Median value of NDVI data",
+        "min": "Minimum value of NDVI data",
+        "stddev": "Standard deviation of NDVI data"
+    }
+
+
+    return satelite_metadata_descriptions
+
+#cimis 
+
+def get_cimis_metadata():
+    metadata = {
+        "Date": "datetime (UTC)",
+        "Day": "integer",
+        "HlyAirTmp": "degrees Fahrenheit",
+        "HlyAsceEto": "inches",
+        "HlyAsceEtr": "inches",
+        "HlyDewPnt": "degrees Fahrenheit",
+        "HlyEto": "inches",
+        "HlyNetRad": "watts per square meter",
+        "HlyPrecip": "inches",
+        "HlyRelHum": "percentage",
+        "HlyResWind": "miles per hour",
+        "HlySoilTmp": "degrees Fahrenheit",
+        "HlySolRad": "watts per square meter",
+        "HlyVapPres": "hectopascals",
+        "HlyWindDir": "degrees",
+        "HlyWindSpd": "miles per hour",
+        "Month": "integer",
+        "Year": "integer",
+        "elevation": "feet",
+        "lat": "degrees",
+        "lon": "degrees"
+    }
+
+    return metadata
+
+def get_cimis_description():
+    metadata_cimis_description = {
+        "Date": "Timestamp in UTC format",
+        "Day": "Day of the month",
+        "HlyAirTmp": "Hourly air temperature",
+        "HlyAsceEto": "Hourly evapotranspiration using ASCE method",
+        "HlyAsceEtr": "Hourly reference evapotranspiration using ASCE method",
+        "HlyDewPnt": "Hourly dew point temperature",
+        "HlyEto": "Hourly evapotranspiration",
+        "HlyNetRad": "Hourly net radiation",
+        "HlyPrecip": "Hourly precipitation",
+        "HlyRelHum": "Hourly relative humidity",
+        "HlyResWind": "Hourly wind speed at reference height",
+        "HlySoilTmp": "Hourly soil temperature",
+        "HlySolRad": "Hourly solar radiation",
+        "HlyVapPres": "Hourly vapor pressure",
+        "HlyWindDir": "Hourly wind direction",
+        "HlyWindSpd": "Hourly wind speed",
+        "Month": "Month of the year",
+        "Year": "Year of observation",
+        "elevation": "Elevation of the location",
+        "lat": "Latitude of the location",
+        "lon": "Longitude of the location"
+    }
+    return metadata_cimis_description
+
+def read_parquet_file(file):
+    return pq.read_table(file)
+
+
+def api_ticket_response():
+    return {
+        "NCEP": {
+            "id": 1,
+            "type": "Weather",
+            "description": "https://www.ncei.noaa.gov/",
+            "coverage": "Global",
+            "frequency": "Hourly",
+            "authors": "US National Centers for Environmental Prediction (NCEP)",
+            "company": "US NCEP-NCEI",
+            "create_date": "2024-10-19",
+            "picture": "https://images.app.goo.gl/ytEe5jAFyQGj6rfC6",
+            "dev_stage": "alpha",
+            "price_scope_month": 1,
+            "price_units": "USD",
+            "root": "getNCEP",
+            "meta_data": "{\"parameter_name\": \"star_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"start_date=2022-10-10\", \"parameter_required\": True},{\"parameter_name\": \"end_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"end_date=2022-10-20\", \"parameter_required\": False}, {\"parameter_name\": \"geoid\", \"parameter_type\": \"String\", \"parameter_example\": \"geoid=f2efb5783281811923424bd80fddbd04beb7ba36c22433031530c34911a3832f\", \"parameter_required\": True}"
+        },
+        "NLDAS": {
+            "id": 3,
+            "type": "Weather",
+            "description": "https://www.weather.gov/",
+            "coverage": "United States",
+            "frequency": "Daily",
+            "authors": "US National Weather Service",
+            "company": "NASA NOAA",
+            "create_date": "2024-10-19",
+            "picture": "https://images.app.goo.gl/kN6xhQqhfqhHEENh9",
+            "dev_stage": "alpha",
+            "price_scope_month": 1,
+            "price_units": "USD",
+            "root": "getNLDAS",
+            "meta_data": "{\"parameter_name\": \"star_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"start_date=2022-10-10\", \"parameter_required\": True},{\"parameter_name\": \"end_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"end_date=2022-10-20\", \"parameter_required\": False}, {\"parameter_name\": \"geoid\", \"parameter_type\": \"String\", \"parameter_example\": \"geoid=f2efb5783281811923424bd80fddbd04beb7ba36c22433031530c34911a3832f\", \"parameter_required\": True}"
+        },
+        "NOAA": {
+            "id": 3,
+            "type": "Weather",
+            "description": "https://www.weather.gov/",
+            "coverage": "United States",
+            "frequency": "Daily",
+            "authors": "US National Weather Service",
+            "company": "NASA NOAA",
+            "create_date": "2024-10-19",
+            "picture": "https://images.app.goo.gl/kN6xhQqhfqhHEENh9",
+            "dev_stage": "alpha",
+            "price_scope_month": 1,
+            "price_units": "USD",
+            "root": "getNOAA",
+            "meta_data": "{\"parameter_name\": \"star_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"start_date=2022-10-10\", \"parameter_required\": True},{\"parameter_name\": \"end_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"end_date=2022-10-20\", \"parameter_required\": False}, {\"parameter_name\": \"geoid\", \"parameter_type\": \"String\", \"parameter_example\": \"geoid=f2efb5783281811923424bd80fddbd04beb7ba36c22433031530c34911a3832f\", \"parameter_required\": True}"
+        },
+        "NOAAForecast" :{
+            "id": 5,
+            "type": "Weather",
+            "description": "https://www.ngdc.noaa.gov/",
+            "coverage": "Global",
+            "frequency": "Daily",
+            "authors": "NOAA",
+            "company": "",
+            "create_date": "2024-10-19",
+            "picture": "https://images.app.goo.gl/Tu7GTZqGQq7UmSwa8",
+            "dev_stage": "alpha",
+            "price_scope_month": 1,
+            "price_units": "USD",
+            "root": "getNOAAForecast",
+            "meta_data": "{\"parameter_name\": \"star_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"start_date=2022-10-10\", \"parameter_required\": True},{\"parameter_name\": \"end_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"end_date=2022-10-20\", \"parameter_required\": False}, {\"parameter_name\": \"geoid\", \"parameter_type\": \"String\", \"parameter_example\": \"geoid=f2efb5783281811923424bd80fddbd04beb7ba36c22433031530c34911a3832f\", \"parameter_required\": True}"
+        },
+        
+        "GHCND": {
+            "id": 5,
+            "type": "Weather",
+            "description": "https://www.ngdc.noaa.gov/",
+            "coverage": "Global",
+            "frequency": "Daily",
+            "authors": "NOAA",
+            "company": "",
+            "create_date": "2024-10-19",
+            "picture": "https://images.app.goo.gl/Tu7GTZqGQq7UmSwa8",
+            "dev_stage": "alpha",
+            "price_scope_month": 1,
+            "price_units": "USD",
+            "root": "getGHCND",
+            "meta_data": "{\"parameter_name\": \"star_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"start_date=2022-10-10\", \"parameter_required\": True},{\"parameter_name\": \"end_date\", \"parameter_type\": \"Datetime\", \"parameter_example\": \"end_date=2022-10-20\", \"parameter_required\": False}, {\"parameter_name\": \"geoid\", \"parameter_type\": \"String\", \"parameter_example\": \"geoid=f2efb5783281811923424bd80fddbd04beb7ba36c22433031530c34911a3832f\", \"parameter_required\": True}"
+        
+        }
+    }
+
+
+def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
+    filePath = '/network/NLDAS/'
+
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+=======
 
     return metadata
 
@@ -2379,6 +2589,7 @@ def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
         utc_end_dt = pytz.utc.localize(end_local_dt)
 
+>>>>>>> Rajat
 
     try:
             
@@ -2403,6 +2614,7 @@ def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
         w_ret = pd.DataFrame()
         for weatherDataset in weather_datasets:
             if end_date is not None:
+<<<<<<< HEAD
                 # Create integer representations for the start and end dates
                 start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
                 end_date_int = end_YYYY_str * 10000 + end_MM_str * 100 + end_DD_str
@@ -2425,6 +2637,26 @@ def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
                         (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) == start_date_int
                     )
                 ).to_pandas()
+=======
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+
+>>>>>>> Rajat
             # if not weather_df.empty:
             #     weather_df.dropna(inplace=True)
             w_all = pd.concat([w_all, weather_df], ignore_index=True)
@@ -2950,6 +3182,7 @@ def getWeatherFromNOAA(agstack_geoid, start_date, end_date):
         utc_end_dt = pytz.utc.localize(end_local_dt)
     w_ret = pd.DataFrame()
     
+<<<<<<< HEAD
 
 
     s1_time_start = time.time()
@@ -3301,10 +3534,239 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
         #     w_all = w_all.fillna(0)
         #     # w_all = w_all.dropna(inplace=True)
         #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
+=======
+
+
+    s1_time_start = time.time()
+    # Fetch WKT polygon and extract latitude and longitude
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+    start_time = time.time()
+    # Get the list of S2 indices and CIDs for the data point
+    s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, [lat], [lon])
+
+    list_of_3_paths = [filePath + 's2_index__L3=' + x for x in s2_index__L3_list
+            if os.path.exists(filePath + 's2_index__L3=' + x)]
+    print(list_of_3_paths)
+    if not list_of_3_paths:
+        return empty_response()
+    
+    weather_datasets = []
+    for x in list_of_3_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+    w_all = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        if end_date is not None:
+            # Filter between start and end date
+            weather_df = weatherDataset.to_table(
+                filter=(
+                    (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= end_YYYY_str) &
+                    (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= end_MM_str) &
+                    (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= end_DD_str)
+                )
+            ).to_pandas()
+        elif end_date is None:
+            # Filter for start date only
+            weather_df = weatherDataset.to_table(
+                filter=(
+                    (ds.field('YYYY') == int(YYYY_str)) &
+                    (ds.field('MM') == int(MM_str)) &
+                    (ds.field('DD') == int(DD_str))
+                )
+            ).to_pandas()
+        w_all = pd.concat([w_all, weather_df], ignore_index=True)
+
+        print(w_all)
+
+        # Ensure TS column is created
+        if len(w_all) > 0:
+            
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['TS'] = pd.to_datetime(w_all['TS'])
+
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
+
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            # w_ret['Year'] = w_ret['YYYY'].astype(int)
+            # w_ret['Month'] = w_ret['MM'].astype(int)
+            # w_ret['Day'] = w_ret['DD'].astype(int)
+            w_ret = w_ret.drop(columns=['YYYY','MM','DD'], axis=1)
+            # weather_df['TS'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
+
+            # numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+            # w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+
+            # # Retain the first TS value or handle TS appropriately
+            # if 'TS' in weather_df.columns and not weather_df['TS'].empty:
+            #     w_df['TS'] = weather_df['TS'].iloc[0]
+            # else:
+            #     w_df['TS'] = pd.NaT  # or some other default value
+
+            # w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+    # if not w_all.empty:
+    #     # Fill NaN values
+    #     w_all = w_all.fillna(0)
+    #     # Take the average of the columns
+    #     w_ret = pd.DataFrame(w_all.groupby(['TS']).mean())
+    #     w_ret.reset_index(inplace=True)
+    # else:
+    #     w_ret = pd.DataFrame()
+    # except Exception as e:
+
+    #     print(f'Error--{e}')
+        # w_ret = empty_response()
+
+    # Drop the index column
+    w_ret = w_ret.reset_index(drop=True)
+
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+    return w_ret
+
+
+def getWeatherFromNOAAFORECASTED(agstack_geoid, start_date,end_date):
+    filePath =  '/network/NOAA/FORECASTED/PARQUET_S2/'
+
+    # Parse the date
+    tok = start_date.split('-')
+    
+    YYYY_str = tok[0]
+    
+    MM_str = tok[1]
+    DD_str = tok[2]
+
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+    w_ret = pd.DataFrame()
+    try:
+
+
+        s1_time_start = time.time()
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(s2_index__L5_list)
+    
+        list_of_5_paths = [filePath + 's2_tokens_l5=' + x for x in s2_index__L5_list
+                if os.path.exists(filePath + 's2_tokens_l5=' + x)]
+        
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+            #     weather_df = weatherDataset.to_table(
+            #         filter=(
+            #             (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+            #             (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+            #             (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+            #         )
+            #     ).to_pandas()
+            # elif end_date is None:
+            #     # Filter for start date only
+            #     weather_df = weatherDataset.to_table(
+            #         filter=(
+            #             (ds.field('Year') == int(YYYY_str)) &
+            #             (ds.field('Month') == int(MM_str)) &
+            #             (ds.field('Day') == int(DD_str))
+            #         )
+            #     ).to_pandas()
+            
+            
+                            # Combine Year, Month, and Day into a single datetime field and filter between start and end dates
+                start_date_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+                end_date_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) >=
+                        (start_date_dt.year * 10000 + start_date_dt.month * 100 + start_date_dt.day)
+                    ) & (
+                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) <=
+                        (end_date_dt.year * 10000 + end_date_dt.month * 100 + end_date_dt.day)
+                    )
+                ).to_pandas()
+            else:
+                # Filter for start date only
+                start_date_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) ==
+                        (start_date_dt.year * 10000 + start_date_dt.month * 100 + start_date_dt.day)
+                    )
+                ).to_pandas()
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+
+            # Ensure TS column is created
+            if len(w_all) > 0:
+                
+                w_all = w_all.fillna(0)
+                # Convert 'time' column to datetime format if it isn't already
+                w_all['TS'] = pd.to_datetime(w_all['TS'])
+
+                # Ensure all numeric columns are converted to numeric type
+                numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+                w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+                # Group by 'time' and calculate the mean for each group
+                w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
+
+                # Ensure 'Year', 'Month', and 'Day' are included in the response
+                w_ret['Year'] = w_ret['Year'].astype(int)
+                w_ret['Month'] = w_ret['Month'].astype(int)
+                w_ret['Day'] = w_ret['Day'].astype(int)
+                # weather_df['TS'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
+
+                # numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+                # w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+
+                # # Retain the first TS value or handle TS appropriately
+                # if 'TS' in weather_df.columns and not weather_df['TS'].empty:
+                #     w_df['TS'] = weather_df['TS'].iloc[0]
+                # else:
+                #     w_df['TS'] = pd.NaT  # or some other default value
+
+                # w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+        # if not w_all.empty:
+        #     # Fill NaN values
+        #     w_all = w_all.fillna(0)
+        #     # Take the average of the columns
+        #     w_ret = pd.DataFrame(w_all.groupby(['TS']).mean())
+>>>>>>> Rajat
         #     w_ret.reset_index(inplace=True)
         # else:
         #     w_ret = pd.DataFrame()
     except Exception as e:
+<<<<<<< HEAD
         print(e)
         w_ret = empty_response()
 
@@ -3319,10 +3781,27 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
     filePath = "/network/AUS/DAILY/PARQUET_S2/"
 
     tok = dtStr.split('-')
+=======
+
+        print(f'Error--{e}')
+        w_ret = empty_response()
+
+
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+    return w_ret
+
+def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
+
+    filePath = '/network/GHCND/PARQUET_S2/'
+    tok = start_date.split('-')
+>>>>>>> Rajat
     YYYY_str = tok[0]
     MM_str = tok[1]
     DD_str = tok[2]
 
+<<<<<<< HEAD
     # Create a datetime object and localize it to UTC
     local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
     utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
@@ -3413,6 +3892,489 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
             print("Non-numeric columns:", w_all.select_dtypes(exclude=[np.number]).columns)
 
             # print("=======w_ret========",w_ret)
+=======
+        # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(datetime(int(YYYY_str), int(MM_str), int(DD_str)))
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(datetime(int(end_YYYY_str), int(end_MM_str), int(end_DD_str)))
+    
+    w_ret = pd.DataFrame()
+    try:
+        
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token---{s2_index__L5_list}')
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+        
+
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        if len(w_all)> 0:
+            w_all = w_all.fillna(0)
+            
+            # Convert 'time' column to datetime format if it isn't already
+            # w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'],utc = True)
+            
+            
+            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc']).dt.tz_localize('UTC')
+
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+
+>>>>>>> Rajat
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+<<<<<<< HEAD
+            w_ret['cloud'] = w_all['cloud']
+            w_ret['cloud_type'] = w_all['cloud_type']
+            w_ret['name'] = w_all['name']
+            w_ret['press_tend'] = w_all['press_tend']
+            # w_ret['rain_trace'] = w_all['rain_trace']
+            w_ret['local_date_time'] = w_all['local_date_time']
+            w_ret['local_date_time_full'] = w_all['local_date_time_full']
+            w_ret['history_product'] = w_all['history_product']
+            w_ret['local_date_time_full'] = w_all['local_date_time_full']
+            w_ret['vis_km'] = w_all['vis_km']
+            w_ret['weather'] = w_all['weather']
+            w_ret['wind_dir'] = w_all['wind_dir']
+            
+            
+            
+            print(f'w_ret--{w_ret.columns}')
+            
+            # Ensure TS column is created
+            # if not weather_df.empty:
+            #     weather_df['aifstime_utc'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
+
+            #     numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
+            #     w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+
+            #     # Retain the first TS value or handle TS appropriately
+            #     if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
+            #         w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
+            #     else:
+            #         w_df['aifstime_utc'] = pd.NaT  # or some other default value
+
+            #     w_all = pd.concat([w_all, w_df], ignore_index=True)
+
+        # if not w_all.empty:
+        #     w_all = w_all.fillna(0)
+        #     # Take the average of the columns
+=======
+        #     if not weather_df.empty:
+        #         weather_df['aifstime_utc'] = pd.to_datetime(
+        #             weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+        #         ).dt.tz_localize('UTC')
+
+        #         # Exclude 's2_token_L9' from numerical columns
+        #         exclude_cols = ['s2_token_L9']
+        #         numeric_cols = [
+        #             col for col in weather_df.select_dtypes(include=[np.number]).columns if col not in exclude_cols
+        #         ]
+        #         w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+
+        #         if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
+        #             w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
+        #         else:
+        #             w_df['aifstime_utc'] = pd.NaT
+
+        #         w_all = pd.concat([w_all, w_df], ignore_index=True)
+            # print("========w_all======",w_all)
+
+        # if not w_all.empty:
+        #     w_all = w_all.fillna(0)
+        #     # w_all = w_all.dropna(inplace=True)
+>>>>>>> Rajat
+        #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
+        #     w_ret.reset_index(inplace=True)
+        # else:
+        #     w_ret = pd.DataFrame()
+    except Exception as e:
+<<<<<<< HEAD
+        print(e)      
+        
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+    return w_ret
+
+
+# def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
+#     # Define file paths
+#     paths = {
+#         "ncep": '/mnt/md1/NCEP/PARQUET_S2/', 
+#         "nldas": '/mnt/md1/NLDAS/PARQUET_S2/',
+#         "noaa": '/mnt/md1/NOAA/DAILY/PROCESSED/PARQUET_S2/',
+#         "noaa_forecasts": '/mnt/md1/NOAA/FORECASTED/PARQUET_S2/',
+#         "global": '/home/rnaura/mnt/md1/GHCND/DAILY/PROCESSED/PARQUET_S2/',
+#         "aus": '/mnt/md1/AUS/DAILY/PROCESSED/PARQUET_S2/',
+#         "aus_forecast": '/mnt/md1/AUS/DAILY/FORECASTED/PARQUET_S2/'
+#     }
+    
+#     # Fetch WKT and extract latitude and longitude
+#     wkt_polygon = fetchWKT(agstack_geoid)
+#     lat, lon = extractLatLonFromWKT(wkt_polygon)
+
+#     # Fetch ETo data from various sources
+#     eto_val_aus = getEtoFromAUS(lat, lon, paths['aus'], start_date, end_date)
+#     eto_val_aus_forecast = getEtoFromAUSForecast(lat, lon, paths['aus_forecast'], start_date, end_date)
+#     eto_val_ncep = getEtoFromNCEP(lat, lon, paths['ncep'], start_date, end_date)
+#     eto_val_nldas = getEtoFromNLDAS(lat, lon, paths['nldas'], start_date, end_date)
+#     eto_val_noaa = getEtoFromNOAA(lat, lon, paths['noaa'], start_date, end_date)
+#     eto_val_noaa_forecast = getEtoFromNOAAForecast(lat, lon, paths['noaa_forecasts'], start_date, end_date)
+#     eto_val_global = getEtoFromGHCND(lat, lon, paths['global'], start_date, end_date)
+    
+#     # Helper function to extract the 'ETo_AVG_IN' value safely
+#     def extract_eto_value(df):
+#         return df['ETo_AVG_IN'].values[0] if not df.empty else None
+
+#     # Extract the 'ETo_AVG_IN' values from each dataset
+#     eto_values = [
+#         extract_eto_value(eto_val_noaa),
+#         extract_eto_value(eto_val_noaa_forecast),
+#         extract_eto_value(eto_val_global),
+#         extract_eto_value(eto_val_ncep),
+#         extract_eto_value(eto_val_nldas),
+#         extract_eto_value(eto_val_aus),
+#         extract_eto_value(eto_val_aus_forecast)
+#     ]
+=======
+        print(e)
+        w_ret = empty_response()
+
+    return w_ret
+
+>>>>>>> Rajat
+
+#     # Log the values (Optional)
+#     for source, value in zip(["NOAA", "NOAA Forecast", "Global", "NCEP", "NLDAS", "AUS", "AUS Forecast"], eto_values):
+#         print(f"{source} ETo: {value}")
+
+<<<<<<< HEAD
+#     # Filter out None, invalid data (extreme negative values), and non-numeric values
+#     valid_eto_values = [val for val in eto_values if isinstance(val, (int, float)) and val > 0]
+    
+#     print(f"Valid ETo values: {valid_eto_values}")
+    
+#     # Calculate the average if there are valid values
+#     average_eto = np.mean(valid_eto_values) if valid_eto_values else np.nan  # Using np.nan as a default value
+    
+    
+    
+#     return average_eto_df
+
+def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
+    ncep_filePath = '/network/NCEP/' 
+    nldas_filePath = '/network/NLDAS/'
+    noaaPath = '/network/NOAA/PARQUET_S2/'
+    noaa_forecasts_path = '/network/NOAA/FORECASTED/PARQUET_S2/'
+    global_path = '/network/GHCND/PARQUET_S2/'
+    aus_filePath = '/network/AUS/DAILY/PARQUET_S2/'
+    aus_forecast_filePath = '/network/AUS/FORECASTED/PARQUET_S2/'
+    cimis_filePath = '/network/CIMIS/HOURLY/PARQUET_S2/'
+
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+    
+    # Set date range
+    date_range = [pd.to_datetime(start_date)] if end_date is None else pd.date_range(start=start_date, end=end_date, freq='D')
+
+    # Initialize list to store daily ETo values
+    daily_eto_values = []
+
+    # Define data sources and their corresponding functions
+    sources = [
+        ('AUS', getEtoFromAUS, aus_filePath),
+        ('AUS_FORECAST', getEtoFromAUSForecast, aus_forecast_filePath),
+        ('NCEP', getEtoFromNCEP, ncep_filePath),
+        ('NLDAS', getEtoFromNLDAS, nldas_filePath),
+        ('NOAA', getEtoFromNOAA, noaaPath),
+        ('NOAA_FORECAST', getEtoFromNOAAForecast, noaa_forecasts_path),
+        ('GLOBAL', getEtoFromGHCND, global_path),
+        ('CIMIS', getEToFromCIMIS, cimis_filePath),
+    ]
+
+    for date in date_range:
+        date_str = date.strftime('%Y-%m-%d')
+
+        eto_values = []
+        for source_name, fetch_func, file_path in sources:
+            # Fetch data and check if it's not empty
+            eto_data = fetch_func(lat, lon, file_path, date_str, date_str)
+            if not eto_data.empty:
+                eto_value = eto_data['ETo_AVG_IN'].iloc[0]
+                if 0 <= eto_value <= 1:  # Condition to filter valid ETo values
+                    print(f"{source_name} gives valid ETo value {eto_value} for {date_str}")
+                    eto_values.append(eto_value)
+                else:
+                    pass
+                    # print(f"{source_name} gives invalid ETo value {eto_value} for {date_str}, skipping.")
+            else:
+                pass
+                # print(f"{source_name} returned empty dataset for {date_str}")
+        
+        # Calculate the average ETo ignoring empty datasets
+        valid_eto_values = [val for val in eto_values if val is not None]
+        average_eto = round(np.mean(valid_eto_values), 2) if valid_eto_values else None
+        
+        # Store the result for the current day
+        daily_eto_values.append({'date': date_str, 'average_eto': average_eto})
+
+    if daily_eto_values:
+        # Convert results to DataFrame
+        daily_eto_df = pd.DataFrame(daily_eto_values)
+        daily_eto_df['average_eto'] = daily_eto_df['average_eto'].fillna(0.0)
+    else:
+        daily_eto_df = pd.DataFrame()
+        
+    return daily_eto_df
+
+def getWeatherFromSatelite(agstack_geoid, start_date, end_date=None):
+    # Convert start and end dates using pd.to_datetime (much faster and cleaner)
+    utc_start_dt = pd.to_datetime(start_date).tz_localize('UTC')
+    
+    # If end_date is None, set utc_end_dt to the same value as utc_start_dt
+    if end_date is not None:    
+        utc_end_dt = pd.to_datetime(end_date).tz_localize('UTC')
+    else:
+        utc_end_dt = utc_start_dt  # When end_date is None, use start_date as end_date
+
+    w_ret = pd.DataFrame()
+
+    s1_time_start = time.time()
+    try:
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+    except Exception as e:
+        print(e)
+        return empty_response()
+   
+    try:
+            # Fetch list of S2 paths and filter existing paths in one step
+        s2_index_L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
+        s2_index_L10_list, _ = get_s2_cellids_and_token_list(10, [lat], [lon])
+
+        list_of_L8_paths = [
+            os.path.join(pa_filePath, f's2_index__L8={x}')
+            for x in s2_index_L8_list if os.path.exists(os.path.join(pa_filePath, f's2_index__L8={x}'))
+        ]
+        list_of_L10_paths = [
+            os.path.join(L8_path, f's2_index__L10={x}')
+            for L8_path in list_of_L8_paths
+            for x in s2_index_L10_list if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
+        ]
+        
+        if not list_of_L10_paths:
+            return empty_response()
+
+        # Generate paths for L8 and L10
+        weather_datasets = [ds.dataset(x, format="parquet", partitioning="hive") for x in list_of_L10_paths]
+        
+        # Generate date range for filtering
+        date_range = pd.date_range(utc_start_dt, utc_end_dt, freq='D')
+        
+        # Create an empty list to accumulate DataFrames
+        all_weather_data = []
+
+        for weatherDataset in weather_datasets:
+            for current_date in date_range:
+                current_date_str = current_date.strftime('%Y-%m-%d')
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        ds.field('YY_MM_DD') == current_date_str
+                    )
+                ).to_pandas()
+
+                if not weather_df.empty:
+                    all_weather_data.append(weather_df)
+
+        if all_weather_data:
+            w_all = pd.concat(all_weather_data, ignore_index=True)
+
+            # Drop unnecessary columns and fill missing values
+            w_all = w_all.drop(['s2_index__L20', 'latitude', 'longitude'], axis=1, errors='ignore')  # Avoid error if columns don't exist
+            w_all = w_all.fillna(0)
+            
+            
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('UTC_DATETIME').mean(numeric_only=True).reset_index()
+            w_ret['s2_index__L19'] = w_all['s2_index__L19']
+    except Exception as e:
+        print(e)
+        w_ret = pd.DataFrame()
+    print(w_ret)
+    return w_ret
+
+
+def getNDVIDatesForGeoid(agstack_geoid, start_date, end_date=None):
+    
+    filePath = "/network/SENTINEL/PARQUET_NDVI_L20/"
+    tok = start_date.split('-')
+    YYYY_str = tok[0]
+    # print(YYYY_str)
+    MM_str = tok[1]
+    DD_str = tok[2]
+    
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_start_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+    
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    # Fetch WKT polygon and extract latitude and longitude
+=======
+# AUS
+def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
+    # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
+    # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/AUS/DAILY/PROCESSED/PARQUET_S2_TEST/'
+    filePath = "/network/AUS/DAILY/PARQUET_S2/"
+
+    tok = dtStr.split('-')
+    YYYY_str = tok[0]
+    MM_str = tok[1]
+    DD_str = tok[2]
+
+    # Create a datetime object and localize it to UTC
+    local_dt = datetime(int(YYYY_str), int(MM_str), int(DD_str))
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    try:
+        
+
+        s1_time_start = time.time()
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        print(f'token---{s2_index__L5_list}')
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        w_ret = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+
+            # if not weather_df.empty:
+            #     weather_df.dropna(inplace=True)
+            print(weather_df.columns)
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+        if len(w_all) > 0:
+            w_all = w_all.fillna(0)
+            # Convert 'time' column to datetime format if it isn't already
+            # After constructing w_all DataFrame and filling Year, Month, and Day
+            if 'Year' in w_all.columns and 'Month' in w_all.columns and 'Day' in w_all.columns:
+                # Create 'aifstime_utc' based on Year, Month, and Day
+                w_all['aifstime_utc'] = pd.to_datetime(
+                    w_all[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+                ).dt.tz_localize('UTC')
+
+            # Now you can convert the 'aifstime_utc' column
+            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
+            # print("======w_all=====",w_all)
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+            print("Columns in w_all before aggregation:", w_all.columns)
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+            
+            print("Non-numeric columns:", w_all.select_dtypes(exclude=[np.number]).columns)
+
+            # print("=======w_ret========",w_ret)
             # Ensure 'Year', 'Month', and 'Day' are included in the response
             w_ret['Year'] = w_ret['Year'].astype(int)
             w_ret['Month'] = w_ret['Month'].astype(int)
@@ -3457,7 +4419,8 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
         # else:
         #     w_ret = pd.DataFrame()
     except Exception as e:
-        print(e)      
+        print(e)
+        
         
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -3531,6 +4494,7 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     aus_forecast_filePath = '/network/AUS/FORECASTED/PARQUET_S2/'
     cimis_filePath = '/network/CIMIS/HOURLY/PARQUET_S2/'
 
+>>>>>>> Rajat
     wkt_polygon = fetchWKT(agstack_geoid)
     lat, lon = extractLatLonFromWKT(wkt_polygon)
     
@@ -3552,6 +4516,266 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
         ('CIMIS', getEToFromCIMIS, cimis_filePath),
     ]
 
+<<<<<<< HEAD
+    # Get the list of S2 indices and CIDs for the data point
+        
+    s2_index__L8_list, L8_cids = get_s2_cellids_and_token_list(8, [lat], [lon])
+    print(s2_index__L8_list)
+
+    list_of_8_paths = [filePath + 's2_index__L8=' + x for x in s2_index__L8_list
+                    if os.path.exists(filePath + 's2_index__L8=' + x)]
+    if not list_of_8_paths:
+        return empty_response()
+    
+    start_date_str = utc_start_dt.strftime('%Y-%m-%d')
+
+    satellite_datasets = []
+    for x in list_of_8_paths:
+        satellite_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+    s_all = pd.DataFrame()
+    for SatelliteDataset in satellite_datasets:
+        if end_date is not None:
+            end_date_str = utc_end_dt.strftime('%Y-%m-%d')
+            # Filter between start and end date
+            s_all = SatelliteDataset.to_table(
+                columns=['YY_MM_DD'],
+                filter=(
+                    (ds.field('YY_MM_DD') >= start_date_str) & (ds.field('YY_MM_DD') <= end_date_str)
+                )
+            ).to_pandas()
+            
+            print(s_all)
+
+        elif end_date is None:
+            # Filter for start date only
+            
+            s_all = SatelliteDataset.to_table(
+                columns=['YY_MM_DD'],
+                filter=(
+                    (ds.field('YY_MM_DD') == start_date_str)
+                )
+            ).to_pandas()
+        
+    return s_all
+
+
+def get_all_available_dates(filePath):
+    """Extract all available dates from the directory structure."""
+    available_dates = []
+    
+    # Traverse through the directory and collect dates from the YY_MM_DD folder names
+    for root, dirs, files in os.walk(filePath):
+        for dir_name in dirs:
+            if dir_name.startswith("YY_MM_DD="):
+                # Extract the date from the directory name
+                date_str = dir_name.split("YY_MM_DD=")[-1]
+                available_dates.append(date_str)
+    print(f'available_dates--{available_dates}')
+    
+    return available_dates
+
+
+
+def get_closest_historical_date(available_dates, target_date):
+    """Find the closest historical date prior to the target date."""
+    # Convert string dates to datetime objects for comparison
+    available_dates = [datetime.strptime(date, '%Y-%m-%d').replace(tzinfo=timezone.utc) for date in available_dates]
+    
+    # Make sure the target_date is also aware
+    if target_date.tzinfo is None:
+        target_date = target_date.replace(tzinfo=timezone.utc)
+
+    # Sort available dates
+    available_dates.sort()
+
+    # Find the most recent date that is less than or equal to the query date
+    recent_date = None
+    for date in available_dates:
+        if date <= target_date:
+            recent_date = date
+        else:
+            break
+
+    return recent_date.strftime('%Y-%m-%d') if recent_date else None
+
+def calculate_stats(weather_df):
+    """Calculate required statistics for a given weather_df."""
+    if 'NDVI' not in weather_df.columns:
+        print("NDVI column not found in the DataFrame.")
+        return None
+
+    ndvi_data = weather_df['NDVI']
+    
+    
+    stats = {
+        "min": ndvi_data.min(),
+        "max": ndvi_data.max(),
+        "avg": ndvi_data.mean(),
+        "median": ndvi_data.median(),
+        "stddev": ndvi_data.std(),
+        "5th_prctile": ndvi_data.quantile(0.05),
+        "10th_prctile": ndvi_data.quantile(0.10),
+        "25th_prctile": ndvi_data.quantile(0.25),
+        "75th_prctile": ndvi_data.quantile(0.75),
+        "90th_prctile": ndvi_data.quantile(0.90),
+        "95th_prctile": ndvi_data.quantile(0.95),
+    }
+    
+    return pd.Series(stats)
+
+
+# Define an empty result structure
+def empty_result():
+    columns = ["Date", "NDVI", "min", "max", "median","stddev","5th_prctile","10th_prctile","25th_prctile","75th_prctile","90th_prctile","95th_prctile"]  # Adjust with the actual column names
+    return pd.DataFrame(columns=columns).fillna("")
+
+def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
+    filePath = "/network/SENTINEL/PARQUET_NDVI_L20/"
+    
+    # Parse start date
+    try:
+        utc_start_dt = pytz.utc.localize(datetime.strptime(start_date, '%Y-%m-%d'))
+    except Exception as e:
+        print(e)
+        return empty_result()
+        
+    # Parse end date
+    if end_date:
+        try:
+            utc_end_dt = pytz.utc.localize(datetime.strptime(end_date, '%Y-%m-%d'))
+        except (ValueError, IndexError) as e:
+            print(f"Error parsing end_date: {e}")
+            return empty_result()
+    else:
+        utc_end_dt = utc_start_dt
+
+    # Fetch WKT and extract latitude and longitude
+    try:
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+    except Exception as e:
+        print(f"Error fetching WKT or extracting lat/lon: {e}")
+        return empty_result()
+    
+    list_of_L8_paths = []
+    list_of_L10_paths = []
+    # Get the list of S2 indices
+    try:
+        s2_index_L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
+        s2_index_L10_list, _ = get_s2_cellids_and_token_list(10, [lat], [lon])
+
+        list_of_L8_paths = [
+            os.path.join(pa_filePath, f's2_index__L8={x}')
+            for x in s2_index_L8_list if os.path.exists(os.path.join(pa_filePath, f's2_index__L8={x}'))
+        ]
+        list_of_L10_paths = [
+            os.path.join(L8_path, f's2_index__L10={x}')
+            for L8_path in list_of_L8_paths
+            for x in s2_index_L10_list if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
+        ]
+        
+        if not list_of_L10_paths:
+            print("No paths found.")
+            return empty_result()
+    except Exception as e:
+        print(f"Error getting S2 indices or building paths: {e}")
+        return empty_result()
+
+    start_date_str = utc_start_dt.strftime('%Y-%m-%d')
+
+    # Check date availability and get closest date
+    try:
+        available_dates = get_all_available_dates(list_of_L10_paths[0])
+        date_counts = Counter(available_dates)
+        print(f'Date counts: {date_counts}')
+        
+        if start_date_str not in available_dates:
+            print(f"No data available for {start_date_str}. Checking for the closest historical date...")
+            closest_date_str = get_closest_historical_date(available_dates, utc_start_dt)
+            print(f'closest_date_str--{closest_date_str}')
+            if not closest_date_str:
+                print("No historical data available.")
+                return empty_result()
+        else:
+            closest_date_str = start_date_str
+    except Exception as e:
+        print(f"Error checking date availability or finding closest date: {e}")
+        return empty_result()
+
+    # Process data for each dataset and date range
+    stats_list = []
+    try:
+        date_range = pd.date_range(start=closest_date_str, end=utc_end_dt.date()).strftime('%Y-%m-%d').tolist() if end_date else [closest_date_str]
+    except Exception as e:
+        date_range = pd.date_range(start=start_date_str, end=utc_end_dt.date()).strftime('%Y-%m-%d').tolist() if end_date else [closest_date_str]
+        print(f'An error occurred - {e}')
+
+    try:
+        weather_datasets = [ds.dataset(path, format="parquet", partitioning="hive") for path in list_of_L10_paths]
+        
+        for weatherDataset in weather_datasets:
+            for date in date_range:
+                try:
+                    date_timestamp = pyarrow.scalar(datetime.strptime(date, '%Y-%m-%d'), type=pyarrow.timestamp('us'))
+                    satelite_df = weatherDataset.to_table(
+                        filter=(ds.field('UTC_DATETIME') == date_timestamp)
+                    ).to_pandas()
+                    
+                    # Check if the DataFrame is empty
+                    if satelite_df.empty:
+                        print(f"No data available for date {date}.")
+                        continue  # Skip to the next date
+
+                    # Safely access UTC_DATETIME
+                    utc_dt = satelite_df['UTC_DATETIME'].iloc[0]
+
+                    # Calculate statistics
+                    stats = calculate_stats(satelite_df)
+                    if stats is not None:
+                        stats['date'] = utc_dt
+                        stats_list.append(stats)
+
+                except Exception as e:
+                    print(f"Error processing data for date {date}: {e}")
+                    return empty_result()
+
+    except Exception as e:
+        print(f"Error setting up weather datasets: {e}")
+        return empty_result()
+
+    # Combine all stats into a single DataFrame
+    if stats_list:
+        try:
+            s_all = pd.DataFrame(stats_list)
+            s_all = s_all.dropna()
+        except Exception as e:
+            print(f"Error combining statistics: {e}")
+            return empty_result()
+    else:
+        print("No statistics calculated.")
+        return empty_result()
+
+    # Process based on the number of unique dates
+    if len(date_range) > 1:
+        # More than 1 date, index by Date and resample
+        s_all.set_index('date', inplace=True)
+
+        # Ensure index is timezone-aware (convert if necessary)
+        if s_all.index.tz is None:
+            s_all.index = s_all.index.tz_localize('UTC')
+
+        try:
+            duplicates = s_all.index[s_all.index.duplicated()]
+            if not duplicates.empty:
+                print("Duplicate index labels found:", duplicates)
+            s_all = s_all[~s_all.index.duplicated(keep='first')]  # Keep the first occurrence
+            s_all.index = pd.to_datetime(s_all.index)
+
+        except Exception as e:
+            print(f'error -{e}')
+
+=======
     for date in date_range:
         date_str = date.strftime('%Y-%m-%d')
 
@@ -3952,6 +5176,7 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
         except Exception as e:
             print(f'error -{e}')
 
+>>>>>>> Rajat
 
         # Interpolate missing data
         s_resampled = s_all.resample('D').interpolate(method='linear')
@@ -4007,6 +5232,7 @@ def getWeatherFromAUSFORECASTED(agstack_geoid, start_date,end_date=None):
         utc_end_dt = pytz.utc.localize(end_local_dt)
     w_ret = pd.DataFrame()
     try:
+<<<<<<< HEAD
         # Fetch WKT polygon and extract latitude and longitude
         wkt_polygon = fetchWKT(agstack_geoid)
         lat, lon = extractLatLonFromWKT(wkt_polygon)
@@ -4075,14 +5301,91 @@ def getWeatherFromAUSFORECASTED(agstack_geoid, start_date,end_date=None):
 
             # Retain 'Year', 'Month', and 'Day' as integers
             if {'Year', 'Month', 'Day'}.issubset(w_ret.columns):
+=======
+
+
+        s1_time_start = time.time()
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                        if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if not list_of_5_paths:
+            return empty_response()
+        
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date is not None:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+            print("========",w_all)
+            # Ensure TS column is created
+            if len(w_all) > 0:
+                
+                w_all = w_all.fillna(0)
+                if 'Year' in w_all.columns and 'Month' in w_all.columns and 'Day' in w_all.columns:
+                    # Create 'aifstime_utc' based on Year, Month, and Day
+                    w_all['aifstime_utc'] = pd.to_datetime(
+                        w_all[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+                    ).dt.tz_localize('UTC')
+                
+                # Convert 'time' column to datetime format if it isn't already
+                w_all['TS'] = pd.to_datetime(w_all['TS'])
+                # w_all['TS'] = pd.to_datetime(w_all[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
+
+
+                # Ensure all numeric columns are converted to numeric type
+                numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+                w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+                # Group by 'time' and calculate the mean for each group
+                w_ret = w_all.groupby('TS').mean(numeric_only=True).reset_index()
+
+                # Ensure 'Year', 'Month', and 'Day' are included in the response
+>>>>>>> Rajat
                 w_ret['Year'] = w_ret['Year'].astype(int)
                 w_ret['Month'] = w_ret['Month'].astype(int)
                 w_ret['Day'] = w_ret['Day'].astype(int)
 
     except Exception as e:
+<<<<<<< HEAD
         print(f"Error: {e}")
         w_ret = empty_response()
 
+=======
+
+        print(f'Error--{e}')
+        w_ret = empty_response()
+
+
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+>>>>>>> Rajat
     return w_ret
 
 #cimis
@@ -4123,6 +5426,7 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
         w_all = pd.DataFrame()
         for weatherDataset in weather_datasets:
             if end_date is not None:
+<<<<<<< HEAD
                 # Create integer representations for the start and end dates
                 start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
                 end_date_int = end_YYYY_str * 10000 + end_MM_str * 100 + end_DD_str
@@ -4146,11 +5450,36 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
                     )
                 ).to_pandas()
 
+=======
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & 
+                        (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & 
+                        (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & 
+                        (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            else:
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == int(YYYY_str)) &
+                        (ds.field('Month') == int(MM_str)) &
+                        (ds.field('Day') == int(DD_str))
+                    )
+                ).to_pandas()
+>>>>>>> Rajat
             w_all = pd.concat([w_all, weather_df], ignore_index=True)
 
         if len(w_all) > 0:
             w_all = w_all.fillna(0)
+<<<<<<< HEAD
             w_all['Date'] = pd.to_datetime(w_all['Date'])
+=======
+            # w_all['Date'] = pd.to_datetime(w_all['Date'])
+            w_all['Date'] = pd.to_datetime(w_all['Date'], utc=True)
+>>>>>>> Rajat
 
             numeric_cols = ['HlyAirTmp', 'HlyDewPnt', 'HlyEto', 'HlyNetRad', 'HlyAsceEto',
                             'HlyAsceEtr', 'HlyPrecip', 'HlyRelHum', 'HlyResWind',
@@ -4161,15 +5490,26 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
                 if col in w_all.columns:
                     w_all[col] = pd.to_numeric(w_all[col], errors='coerce').fillna(0)
 
+<<<<<<< HEAD
             # Group data by Date to get hourly averages
+=======
+>>>>>>> Rajat
             w_ret = w_all.groupby('Date', as_index=False).mean(numeric_only=True)
             w_ret['Year'] = w_ret['Date'].dt.year
             w_ret['Month'] = w_ret['Date'].dt.month
             w_ret['Day'] = w_ret['Date'].dt.day
+<<<<<<< HEAD
 
     except Exception as e:
         print(e)
         w_ret = empty_response()
+=======
+            w_ret['Date'] = w_ret['Date'].dt.strftime("%a, %d %b %Y %H:%M:%S UTC")
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+
+>>>>>>> Rajat
     return w_ret
 
 def get_jrc_metadata():
