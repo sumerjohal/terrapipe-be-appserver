@@ -1427,6 +1427,254 @@ def getAvailableDatesForGeoID(agstack_geoid):
         return {"error": f"Failed to process geoid {agstack_geoid}: {str(e)}"}
 
 
+def get_satelite_stats_etc_metadata():
+
+    metadata = {
+        "NDVI_p5": "dimensionless",
+        "NDVI_p10": "dimensionless",
+        "NDVI_p25": "dimensionless",
+        "NDVI_p50": "dimensionless",
+        "NDVI_p75": "dimensionless",
+        "NDVI_p90": "dimensionless",
+        "NDVI_p95": "dimensionless",
+        "NDVI_avg": "dimensionless",
+        "NDVI_StdDev": "dimensionless"
+    }
+
+
+    return metadata
+
+
+def get_satelite_etc_desc():
+    
+    satelite_metadata_descriptions = {
+        "NDVI_p5": "5th percentile value of NDVI data",
+        "NDVI_p10": "10th percentile value of NDVI data",
+        "NDVI_p25": "25th percentile value of NDVI data",
+        "NDVI_p50": "50th percentile value of NDVI data (median)",
+        "NDVI_p75": "75th percentile value of NDVI data",
+        "NDVI_p90": "90th percentile value of NDVI data",
+        "NDVI_p95": "95th percentile value of NDVI data",
+        "NDVI_avg": "Average value of NDVI data",
+        "NDVI_StdDev": "Standard deviation of NDVI data"
+    }
+
+    return satelite_metadata_descriptions
+
+def calculate_stats_etc(weather_df):
+    """
+    Calculate required statistics for a given weather_df.
+    """
+    if 'NDVI' not in weather_df.columns:
+        print("NDVI column not found in the DataFrame.")
+        return None
+
+    # Filter NDVI values to keep only valid range
+    ndvi_data = weather_df['NDVI'].clip(lower=0, upper=1)
+
+    # Calculate statistics
+    stats = {
+        "NDVI_p5": ndvi_data.quantile(0.05),
+        "NDVI_p10": ndvi_data.quantile(0.10),
+        "NDVI_p25": ndvi_data.quantile(0.25),
+        "NDVI_p50": ndvi_data.median(),
+        "NDVI_p75": ndvi_data.quantile(0.75),
+        "NDVI_p90": ndvi_data.quantile(0.90),
+        "NDVI_p95": ndvi_data.quantile(0.95),
+        "NDVI_avg": ndvi_data.mean(),
+        "NDVI_StdDev": ndvi_data.std()
+    }
+    return pd.Series(stats)
+
+
+def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
+    filePath = "/network/SENTINEL/PARQUET_NDVI_L20/"
+    
+    # Parse start date
+    try:
+        utc_start_dt = pytz.utc.localize(datetime.strptime(start_date, '%Y-%m-%d'))
+    except Exception as e:
+        print(e)
+        return empty_result()
+        
+    # Parse end date
+    if end_date:
+        try:
+            utc_end_dt = pytz.utc.localize(datetime.strptime(end_date, '%Y-%m-%d'))
+        except (ValueError, IndexError) as e:
+            print(f"Error parsing end_date: {e}")
+            return empty_result()
+    else:
+        utc_end_dt = utc_start_dt
+
+    # Fetch WKT and extract latitude and longitude
+    try:
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+    except Exception as e:
+        print(f"Error fetching WKT or extracting lat/lon: {e}")
+        return empty_result()
+    
+    list_of_L8_paths = []
+    list_of_L10_paths = []
+    # Get the list of S2 indices
+    try:
+        s2_index_L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
+        print(f's2_index_L8_list--{s2_index_L8_list}')
+        s2_index_L10_list, _ = get_s2_cellids_and_token_list(10, [lat], [lon])
+        print(f's2_index_L10_list--{s2_index_L10_list}')
+
+        list_of_L8_paths = [
+            os.path.join(pa_filePath, f's2_index__L8={x}')
+            for x in s2_index_L8_list if os.path.exists(os.path.join(pa_filePath, f's2_index__L8={x}'))
+        ]
+        list_of_L10_paths = [
+            os.path.join(L8_path, f's2_index__L10={x}')
+            for L8_path in list_of_L8_paths
+            for x in s2_index_L10_list
+            if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
+        ]
+
+        print(f'list_of_L10_paths--{list_of_L10_paths}')
+        
+        if not list_of_L10_paths:
+            print("No paths found.")
+            return empty_result()
+    except Exception as e:
+        print(f"Error getting S2 indices or building paths: {e}")
+        return empty_result()
+
+    start_date_str = utc_start_dt.strftime('%Y-%m-%d')
+
+    # Check date availability and get closest date
+    try:
+        available_dates = get_all_available_dates(list_of_L10_paths[0])
+        date_counts = Counter(available_dates)
+        print(f'Date counts: {date_counts}')
+        
+        if start_date_str not in available_dates:
+            print(f"No data available for {start_date_str}. Checking for the closest historical date...")
+            closest_date_str = get_closest_historical_date(available_dates, utc_start_dt)
+            print(f'closest_date_str--{closest_date_str}')
+            if not closest_date_str:
+                print("No historical data available.")
+                return empty_result()
+        else:
+            closest_date_str = start_date_str
+    except Exception as e:
+        print(f"Error checking date availability or finding closest date: {e}")
+        return empty_result()
+
+    # Process data for each dataset and date range
+    stats_list = []
+    satellite_result = {}  # Dictionary to store results by date
+    try:
+        date_range = pd.date_range(start=closest_date_str, end=utc_end_dt.date()).strftime('%Y-%m-%d').tolist() if end_date else [closest_date_str]
+    except Exception as e:
+        date_range = pd.date_range(start=start_date_str, end=utc_end_dt.date()).strftime('%Y-%m-%d').tolist() if end_date else [closest_date_str]
+        print(f'An error occurred - {e}')
+
+    try:
+        weather_datasets = [ds.dataset(path, format="parquet", partitioning="hive") for path in list_of_L10_paths]
+        
+        for weatherDataset in weather_datasets:
+            for date in date_range:
+                try:
+                    date_timestamp = pyarrow.scalar(datetime.strptime(date, '%Y-%m-%d'), type=pyarrow.timestamp('us'))
+                    satelite_df = weatherDataset.to_table(
+                        filter=(ds.field('UTC_DATETIME') == date_timestamp)
+                    ).to_pandas()
+                    
+                    # Check if the DataFrame is empty
+                    if satelite_df.empty:
+                        print(f"No data available for date {date}.")
+                        satellite_result[date] = [{'average_stats': None}]
+                        continue  # Skip to the next date
+
+                    # Safely access UTC_DATETIME
+                    utc_dt = satelite_df['UTC_DATETIME'].iloc[0]
+
+                    # Calculate statistics
+                    stats = calculate_stats_etc(satelite_df)
+                    if stats is not None:
+                        stats['date'] = utc_dt
+                        stats_list.append(stats)
+                        satellite_result[date] = [{'average_stats': stats}]  # Store in result dictionary
+
+                except Exception as e:
+                    print(f"Error processing data for date {date}: {e}")
+                    satellite_result[date] = [{'average_stats': None}]
+
+    except Exception as e:
+        print(f"Error setting up weather datasets: {e}")
+        return empty_result()
+
+    # Combine all stats into a single DataFrame
+    if stats_list:
+        try:
+            s_all = pd.DataFrame(stats_list)
+            s_all = s_all.dropna()
+        except Exception as e:
+            print(f"Error combining statistics: {e}")
+            return empty_result()
+    else:
+        print("No statistics calculated.")
+        return satellite_result
+
+    # Process based on the number of unique dates
+    if len(date_range) > 1:
+        # Process for multiple dates
+        s_all.set_index('date', inplace=True)
+
+        if s_all.index.tz is None:
+            s_all.index = s_all.index.tz_localize('UTC')
+
+        try:
+            duplicates = s_all.index[s_all.index.duplicated()]
+            if not duplicates.empty:
+                # print("Duplicate index labels found:", duplicates)
+                pass
+            s_all = s_all[~s_all.index.duplicated(keep='first')]
+            s_all.index = pd.to_datetime(s_all.index)
+
+        except Exception as e:
+            print(f'error - {e}')
+
+        s_resampled = s_all.resample('D').interpolate(method='linear')
+        ndvi_columns = [col for col in s_resampled.columns if col.startswith('NDVI')]
+
+        for col in ndvi_columns:
+            # Ensure all values are between 0 and 1 or NaN for each NDVI column
+            s_resampled.loc[(s_resampled[col] < 0) | (s_resampled[col] > 1), col] = np.nan
+
+        s_resampled[ndvi_columns].fillna(method='ffill', inplace=True)  # Forward fill
+        s_resampled[ndvi_columns].fillna(method='bfill', inplace=True)  # Backward fill
+
+        if len(s_resampled) > 0:
+            last_date = s_resampled.index[-1]
+            if last_date < utc_end_dt:
+                new_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), end=utc_end_dt, freq='D')
+                new_rows = pd.DataFrame(index=new_dates)
+                s_resampled = pd.concat([s_resampled, new_rows], axis=0)
+                s_resampled = s_resampled.interpolate(method='linear')
+
+        s_resampled = s_resampled[(s_resampled.index >= utc_start_dt) & (s_resampled.index <= utc_end_dt)]
+
+        # Prepare final result
+        final_result = {}
+        for date, group in s_resampled.groupby(s_resampled.index.date):
+            stats_list = group.to_dict(orient='records')
+            final_result[date.strftime('%Y-%m-%d')] = stats_list
+
+        return final_result
+
+    else:
+        # Process for a single date
+        final_result = {}
+        stats_list = s_all.to_dict(orient='records')
+        final_result[start_date_str] = stats_list
+        return final_result
+
 
 
 # def getNDVIgdfFromGeoid(agstack_geoid, start_date,end_date):
@@ -3506,8 +3754,8 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     # Set date range
     date_range = [pd.to_datetime(start_date)] if end_date is None else pd.date_range(start=start_date, end=end_date, freq='D')
 
-    # Initialize list to store daily ETo values
-    daily_eto_values = []
+    # Initialize dictionary to store daily ETo values
+    eto_result = {}
 
     # Define data sources and their corresponding functions
     sources = [
@@ -3520,7 +3768,7 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
         ('GLOBAL', getEtoFromGHCND, global_path),
         ('CIMIS', getEToFromCIMIS, cimis_filePath),
     ]
-
+    
     for date in date_range:
         date_str = date.strftime('%Y-%m-%d')
 
@@ -3535,26 +3783,23 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
                     eto_values.append(eto_value)
                 else:
                     pass
-                    # print(f"{source_name} gives invalid ETo value {eto_value} for {date_str}, skipping.")
             else:
                 pass
-                # print(f"{source_name} returned empty dataset for {date_str}")
         
         # Calculate the average ETo ignoring empty datasets
         valid_eto_values = [val for val in eto_values if val is not None]
-        average_eto = round(np.mean(valid_eto_values), 2) if valid_eto_values else None
+        average_eto = round(np.mean(valid_eto_values), 2) if valid_eto_values else 0
         
-        # Store the result for the current day
-        daily_eto_values.append({'date': date_str, 'average_eto': average_eto})
+        # Add the result for the current day to the dictionary
+        eto_result[date_str] = [{'average_eto': average_eto}]
 
-    if daily_eto_values:
-        # Convert results to DataFrame
-        daily_eto_df = pd.DataFrame(daily_eto_values)
-        daily_eto_df['average_eto'] = daily_eto_df['average_eto'].fillna(0.0)
-    else:
-        daily_eto_df = pd.DataFrame()
-        
-    return daily_eto_df
+    # Ensure all dates are included, even if no valid ETo was calculated
+    for date in date_range:
+        date_str = date.strftime('%Y-%m-%d')
+        if date_str not in eto_result:
+            eto_result[date_str] = [{'average_eto': 0}]
+    
+    return eto_result
 
 def getWeatherFromSatelite(agstack_geoid, start_date, end_date=None):
     # Convert start and end dates using pd.to_datetime (much faster and cleaner)
@@ -3824,7 +4069,6 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
             if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
         ]
 
-        
         print(f'list_of_L10_paths--{list_of_L10_paths}')
         
         if not list_of_L10_paths:
@@ -3857,6 +4101,7 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
 
     # Process data for each dataset and date range
     stats_list = []
+    satellite_result = {}  # Dictionary to store results by date
     try:
         date_range = pd.date_range(start=closest_date_str, end=utc_end_dt.date()).strftime('%Y-%m-%d').tolist() if end_date else [closest_date_str]
     except Exception as e:
@@ -3877,6 +4122,7 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
                     # Check if the DataFrame is empty
                     if satelite_df.empty:
                         print(f"No data available for date {date}.")
+                        satellite_result[date] = [{'average_stats': None}]
                         continue  # Skip to the next date
 
                     # Safely access UTC_DATETIME
@@ -3887,10 +4133,11 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
                     if stats is not None:
                         stats['date'] = utc_dt
                         stats_list.append(stats)
+                        satellite_result[date] = [{'average_stats': stats}]  # Store in result dictionary
 
                 except Exception as e:
                     print(f"Error processing data for date {date}: {e}")
-                    return empty_result()
+                    satellite_result[date] = [{'average_stats': None}]
 
     except Exception as e:
         print(f"Error setting up weather datasets: {e}")
@@ -3906,14 +4153,13 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
             return empty_result()
     else:
         print("No statistics calculated.")
-        return empty_result()
+        return satellite_result
 
     # Process based on the number of unique dates
     if len(date_range) > 1:
-        # More than 1 date, index by Date and resample
+        # Process for multiple dates
         s_all.set_index('date', inplace=True)
 
-        # Ensure index is timezone-aware (convert if necessary)
         if s_all.index.tz is None:
             s_all.index = s_all.index.tz_localize('UTC')
 
@@ -3921,39 +4167,40 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
             duplicates = s_all.index[s_all.index.duplicated()]
             if not duplicates.empty:
                 print("Duplicate index labels found:", duplicates)
-            s_all = s_all[~s_all.index.duplicated(keep='first')]  # Keep the first occurrence
+            s_all = s_all[~s_all.index.duplicated(keep='first')]
             s_all.index = pd.to_datetime(s_all.index)
 
         except Exception as e:
             print(f'error -{e}')
 
-
-        # Interpolate missing data
         s_resampled = s_all.resample('D').interpolate(method='linear')
         s_resampled.reset_index(inplace=True)
 
-        # Extrapolation if the last date is less than the requested end_date
         last_date = s_resampled['date'].iloc[-1]
         if last_date < utc_end_dt:
-            
             new_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), end=utc_end_dt, freq='D')
             new_rows = pd.DataFrame({'date': new_dates})
-            # new_rows.set_index('date', inplace=True)
-
-            # Concatenate new rows with the existing DataFrame
             s_resampled = pd.concat([s_resampled, new_rows], axis=0)
             s_resampled.set_index('date', inplace=True)
-            s_resampled = s_resampled.interpolate(method='linear')  # Extrapolate linearly
+            s_resampled = s_resampled.interpolate(method='linear')
             s_resampled.reset_index(inplace=True)
 
-            
-        # Filter the DataFrame for the date range
         s_resampled = s_resampled[(s_resampled['date'].dt.date >= utc_start_dt.date()) & (s_resampled['date'].dt.date <= utc_end_dt.date())]
 
-        return s_resampled  # Return the DataFrame directly
+        # Convert to JSON format
+        final_result = {}
+        for date, group in s_resampled.groupby(s_resampled['date'].dt.date):
+            stats_list = group.to_dict(orient='records')
+            final_result[date.strftime('%Y-%m-%d')] = stats_list
+
+        return final_result
     else:
-        # Single date, return the DataFrame
-        return s_all
+        # Process for a single date
+        final_result = {}
+        stats_list = s_all.to_dict(orient='records')
+        final_result[start_date_str] = stats_list
+        return final_result
+        
 
 
 
@@ -5107,6 +5354,25 @@ def getSateliteStatsRoute():
 
     return response
 
+@app.route('/getSateliteStatsByDate')
+def getSateliteStatsRouteByDate():
+    geoid = request.args['geoid']
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', None)
+
+    if end_date:
+        weather_data = getSateliteStatsFn(geoid, start_date, end_date)
+    else:
+        weather_data = getSateliteStatsFn(geoid, start_date)
+
+    response = {
+        "NDVI": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
+        "metadata": get_satelite_stats_metadata(),
+        "metadata-description": get_satelite_desc()
+    }
+
+    return jsonify(response)
+
 
 #CIMIS
 cache_cimis = {}
@@ -5152,6 +5418,25 @@ def getEtoFromWeather():
                 
                 }
     
+    return jsonify(response)
+
+@app.route('/getEtoByDate')
+def getEtoFromWeatherByDate():
+    geoid = request.args['geoid']
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', None)
+
+    if end_date:
+        weather_data = getEtoFromWeatherData(geoid, start_date, end_date)
+    else:
+        weather_data = getEtoFromWeatherData(geoid, start_date)
+
+    response = {
+        "data": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
+        "metadata": eto_metadata(),
+        "metadata-description": get_eto_data_description()
+    }
+
     return jsonify(response)
 
 #JRC
@@ -5252,7 +5537,27 @@ def getNDVIDatesForGeoId():
 
     return jsonify(result), 200
 
-@app.route('/getWeather')
+@app.route('/getSateliteStatsETC')
+def getSateliteStatsETCRoute():
+    geoid = request.args['geoid']
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', None)
+
+    if end_date:
+        weather_data = getSateliteStatsFnETC(geoid, start_date, end_date)
+    else:
+        weather_data = getSateliteStatsFnETC(geoid, start_date)
+
+    response = {
+        "NDVI": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
+        "metadata": get_satelite_stats_etc_metadata(),
+        "metadata-description": get_satelite_etc_desc()
+    }
+
+    return jsonify(response)
+
+
+@app.route('/getWeatherEtc')
 def getWeatherfunc():
     # Extract query parameters
     geoid = request.args.get('geoid')
