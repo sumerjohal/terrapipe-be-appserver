@@ -1310,7 +1310,7 @@ def getNDVIgdfFromGeoid(agstack_geoid, dt_str):
 
     return clipped_ndvi_gdf, boundary_gdf
 
-def getNDVIgdfFromGeoidEtc(agstack_geoid, endDtStr, N):
+def getNDVIgdfFromGeoidEtc(agstack_geoid, StartDtStr, N):
     """
     Fetch NDVI data and geometries for a given geoid and date, then create a GeoDataFrame.
     Returns a GeoDataFrame with NDVI values between 0 and 1, or NaN if out of range.
@@ -1324,19 +1324,30 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, endDtStr, N):
     - A GeoDataFrame with NDVI values for the date N days before the `endDtStr`, clipped to the boundary geometry.
     """
     # Clean the endDtStr to remove any additional parameters (e.g., ",N=7")
-    endDtStr = endDtStr.split(',')[0]  # Keep only the date part
+    
+    StartDtStr = StartDtStr.split(',')[0]  # Remove extra parameters
+
+    # Debug: Print the value of N
+    print(f"Value of N: {N}")
+
+    # Check if N is being passed correctly
+    if not isinstance(N, int) or N <= 0:
+        raise ValueError(f"Invalid value for N: {N}. N must be a positive integer.")
 
     # Convert end date string to datetime object
-    end_dt = datetime.strptime(endDtStr, '%Y-%m-%d')
-    
-    # Calculate start date by subtracting N days from the end date
-    start_dt = end_dt - timedelta(days=N)
-    
-    # Convert the start date back to string format
-    startDtStr = start_dt.strftime('%Y-%m-%d')
+    try:
+        start_dt = datetime.strptime(StartDtStr, '%Y-%m-%d')
+    except ValueError as e:
+        raise ValueError(f"Error parsing endDtStr: {endDtStr}. Ensure it is in 'YYYY-MM-DD' format.") from e
 
-    # Print start date for debugging
-    print(f"Start date: {startDtStr}")
+    # Calculate start date by subtracting N days from the end date
+    end_dt = start_dt - timedelta(days=N)
+
+    # Convert the start date back to string format
+    endDtStr = end_dt.strftime('%Y-%m-%d')
+
+    # Print start and end dates for debugging
+    print(f"Start date: {StartDtStr}, End date: {endDtStr}")
     
     # Fetch S2 tokens and geometries
     s2_tokens_gdf, boundary_gdf = polygon_to_s2_tokens(agstack_geoid, 19)
@@ -1368,6 +1379,8 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, endDtStr, N):
         if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
     }
 
+    print(list_of_L10_paths)
+
     if not list_of_L10_paths:
         # Return empty GeoDataFrame and boundary_gdf if no paths are found
         return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf
@@ -1379,14 +1392,21 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, endDtStr, N):
     ]
 
     for weather_dataset in weather_datasets:
-        # Filter data by date
+        print(f"Filtering NDVI data from {StartDtStr} to {endDtStr}")
+
+        # Filter data for the date range
         filtered_table = weather_dataset.to_table(
-            columns=['s2_index__L19', 'NDVI'],
-            filter=ds.field('YY_MM_DD') == startDtStr
+            columns=['s2_index__L19', 'NDVI', 'YY_MM_DD'],
+            filter=(
+                (ds.field('YY_MM_DD') >= endDtStr) &
+                (ds.field('YY_MM_DD') <= StartDtStr)
+            )
         ).to_pandas()
 
+        print(filtered_table)
         # Filter rows with valid S2 tokens in L10
         intersected_L19_filtered_table = filtered_table[filtered_table['s2_index__L19'].isin(L19_token_list)]
+        
 
         # Ensure no duplicate S2 tokens and calculate average NDVI
         aggregated_df = (
@@ -3105,8 +3125,104 @@ def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
 
 #     return w_ret
 
-
 def getWeatherFromNCEP(agstack_geoid, dtStr, end_date=None):
+    filePath = '/network/NCEP/'
+    # Parse the date
+    tok = dtStr.split('-')
+    YYYY_str = int(tok[0])
+    MM_str = int(tok[1])
+    DD_str = int(tok[2])
+
+    # Create a datetime object for start date and localize it to UTC
+    local_dt = datetime(YYYY_str, MM_str, DD_str)
+    utc_dt = pytz.utc.localize(local_dt)  # Convert to UTC
+
+    if end_date:
+        # Parse end date and localize it to UTC if provided
+        end_tok = end_date.split('-')
+        end_YYYY_str = int(end_tok[0])
+        end_MM_str = int(end_tok[1])
+        end_DD_str = int(end_tok[2])
+        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+        utc_end_dt = pytz.utc.localize(end_local_dt)
+
+    
+    w_ret = pd.DataFrame()
+
+    try:
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        start_time = time.time()
+        
+        # Get the list of S2 indices and CIDs for the data point
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
+                           if os.path.exists(filePath + 's2_token_L5=' + x)]
+        if list_of_5_paths == []:
+            return empty_response()
+
+        weather_datasets = []
+        for x in list_of_5_paths:
+            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+
+        w_all = pd.DataFrame()
+        for weatherDataset in weather_datasets:
+            if end_date:
+                # Filter between start and end date
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') >= YYYY_str) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= MM_str) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= DD_str) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
+            elif end_date is None:
+                # Filter for start date only
+                weather_df = weatherDataset.to_table(
+                    filter=(
+                        (ds.field('Year') == YYYY_str) &
+                        (ds.field('Month') == MM_str) &
+                        (ds.field('Day') == DD_str)
+                    )
+                ).to_pandas()
+
+            if not weather_df.empty:
+                weather_df.dropna(inplace=True)
+
+            # print(weather_df['time'].head())
+            # print(weather_df['time'].tail())
+            # print(weather_df.dtypes)
+            # Concatenate to the main DataFrame
+            w_all = pd.concat([w_all, weather_df], ignore_index=True)
+
+        if len(w_all) > 0:
+            # Convert 'time' column to datetime format if it isn't already
+            w_all['time'] = pd.to_datetime(w_all['time'])
+
+            # Ensure all numeric columns are converted to numeric type
+            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+            # Group by 'time' and calculate the mean for each group
+            w_ret = w_all.groupby('time').mean(numeric_only=True).reset_index()
+
+            # Ensure 'Year', 'Month', and 'Day' are included in the response
+            w_ret['Year'] = w_ret['Year'].astype(int)
+            w_ret['Month'] = w_ret['Month'].astype(int)
+            w_ret['Day'] = w_ret['Day'].astype(int)
+
+    except Exception as e:
+        print(e)
+        w_ret = empty_response()
+
+    end_time = time.time()
+    time_elapsed = (end_time - start_time)
+
+    return w_ret
+
+
+def getWeatherFromNCEPIndexByDate(agstack_geoid, dtStr, end_date=None):
     filePath = '/network/NCEP/'
     
     # Parse the start date
@@ -3977,6 +4093,73 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     
     return eto_result
 
+def getEtoFromWeatherDataByDate(agstack_geoid, start_date, end_date):
+    # Define file paths
+    file_paths = {
+        'AUS': '/media/rnaura/39d0b9c2-7989-4209-8972-db13745755e9/mnt/md0/AUS_TEST/DAILY/PARQUET_S2/',
+        'AUS_FORECAST': '/media/rnaura/39d0b9c2-7989-4209-8972-db13745755e9/mnt/md0/AUS_TEST/FORECASTED/PARQUET_S2/',
+        'NCEP': '/network/NCEP/',
+        'NLDAS': '/network/NLDAS/',
+        'NOAA': '/network/NOAA/PARQUET_S2/',
+        'NOAA_FORECAST': '/network/NOAA/FORECASTED/PARQUET_S2/',
+        'GLOBAL': '/network/GHCND/PARQUET_S2/',
+        'CIMIS': '/network/CIMIS/HOURLY/PARQUET_S2/',
+    }
+    # Define functions for each source
+    fetch_funcs = {
+        'AUS': getEtoFromAUS,
+        # 'AUS_FORECAST': getEtoFromAUSForecast,
+        'NCEP': getEtoFromNCEP,
+        'NLDAS': getEtoFromNLDAS,
+        'NOAA': getEtoFromNOAA,
+        # 'NOAA_FORECAST': getEtoFromNOAAForecast,
+        'GLOBAL': getEtoFromGHCND,
+        'CIMIS': getEToFromCIMIS,
+    }
+
+    # Get WKT and lat/lon for the location
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+
+    # Create date range
+    date_range = [pd.to_datetime(start_date)] if end_date is None else pd.date_range(start=start_date, end=end_date, freq='D')
+
+    # Initialize result dictionary
+    eto_result = {}
+
+    # Iterate over each date in the range
+    for date in date_range:
+        date_str = date.strftime('%Y-%m-%d')
+        eto_values = []
+
+        # Process all sources
+        for source_name, fetch_func in fetch_funcs.items():
+            file_path = file_paths[source_name]
+            eto_data = fetch_func(lat, lon, file_path, date_str, date_str)
+
+            # Check for valid data
+            if not eto_data.empty:
+                eto_value = eto_data['ETo_AVG_IN'].iloc[0]
+                if 0 <= eto_value <= 1:  # Filter valid ETo values
+                    eto_values.append(eto_value)
+
+        # Calculate the average ETo
+        if eto_values:
+            average_eto = round(np.mean(eto_values), 2)
+        else:
+            average_eto = 0  # Default if no valid ETo values
+
+        # Add the result for the date
+        eto_result[date_str] = [{'average_eto': average_eto}]
+
+    # Ensure all dates are included
+    for date in date_range:
+        date_str = date.strftime('%Y-%m-%d')
+        eto_result.setdefault(date_str, [{'average_eto': 0}])
+
+    return eto_result
+    
+
 def getWeatherEtoForEtc(agstack_geoid, start_date, end_date):
 
     ncep_filePath = '/network/NCEP/'
@@ -4812,6 +4995,7 @@ def getWeatherFromJRC(agstack_geoid):
    
 # Get average weather data from all sources
 def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
+    end_date = datetime.now().strftime('%Y-%m-%d')
     # Retrieve data from various sources
     ncep_data_dict = getWeatherFromNCEP(geoid, start_date, end_date)
     aus_df = getWeatherFromAUS(geoid, start_date, end_date)
@@ -4860,7 +5044,6 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         result[date_str].append(group.drop(columns=['date', 'time']).to_dict(orient='records')[0])
     
     return result
-
 
 
 
@@ -5338,9 +5521,9 @@ def getNCEP():
     end_date = request.args.get('end_date', None)
 
     if end_date:
-        weather_data = getWeatherFromNCEP(geoid, start_date, end_date)
+        weather_data = getWeatherFromNCEPIndexByDate(geoid, start_date, end_date)
     else:
-        weather_data = getWeatherFromNCEP(geoid, start_date)
+        weather_data = getWeatherFromNCEPIndexByDate(geoid, start_date)
 
     # Ensure that the result from getWeatherFromNCEP is already a dictionary or JSON-serializable format
     response = {
@@ -5609,9 +5792,9 @@ def getSateliteStatsRoute():
     end_date = request.args.get('end_date', None)  # This retrieves the end_date correctly
 
     # Pass end_date directly without overriding it to None
-    satelite_stats = getSateliteStatsFn(geoid, start_date, end_date)
+    json_data = getSateliteStatsFn(geoid, start_date, end_date)
 
-    json_data = satelite_stats.to_dict(orient='records')
+    # json_data = satelite_stats.to_dict(orient='records')
 
     response = {
         "NDVI": json_data,
@@ -5714,9 +5897,9 @@ def getEtoFromWeatherByDate():
     end_date = request.args.get('end_date', None)
 
     if end_date:
-        weather_data = getEtoFromWeatherData(geoid, start_date, end_date)
+        weather_data = getEtoFromWeatherDataByDate(geoid, start_date, end_date)
     else:
-        weather_data = getEtoFromWeatherData(geoid, start_date)
+        weather_data = getEtoFromWeatherDataByDate(geoid, start_date)
 
     response = {
         "data": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
@@ -5797,10 +5980,8 @@ def getNDVIImgEtc():
     date = request.args.get('date')
     agstack_geoid = request.args.get('geoid', '')
     N = request.args.get('N')
-    if N is None:
-        N = 7  # default value, or handle as appropriate
-    else:
-        N = int(N)  # ensure it's converted to an integer
+    
+    N = int(N)  # ensure it's converted to an integer
 
     
     # Assuming `getNDVIgdfFromGeoidEtc` is the updated function
@@ -6042,3 +6223,4 @@ def getNDVI():
         #print('Invalid Polygon')
         return 'Invalid Polygon'
 """
+

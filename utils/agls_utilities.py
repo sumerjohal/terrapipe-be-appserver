@@ -28391,7 +28391,9 @@ def interpolateMissingValsEtcWeather(weather_df):
     return new_weather_df
 
 
-def getWeatherForGeoid(df: pd.DataFrame, agstack_geoid) -> pd.DataFrame:
+def getWeatherForGeoid(df, agstack_geoid):
+    
+
     # List of required columns to filter
     required_columns = [
         'ULWRF_surface', 'USWRF_surface', 'DLWRF_surface', 
@@ -28401,7 +28403,8 @@ def getWeatherForGeoid(df: pd.DataFrame, agstack_geoid) -> pd.DataFrame:
         'T_max', 'T_min', 'T_mean','RH_2maboveground', 'DPT_2maboveground'
     ]
     
-    df['Date'] = df['time']
+    df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
+
     # Ensure 'Date' column is a datetime object
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'])
@@ -28416,13 +28419,18 @@ def getWeatherForGeoid(df: pd.DataFrame, agstack_geoid) -> pd.DataFrame:
 
     # Reindexing only if missing dates exist
     full_date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
-    if not df['Date'].isin(full_date_range).all():
+    missing_dates = full_date_range.difference(df['Date'])
+    
+    if not missing_dates.empty:
         df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
-        df = df.interpolate(method='linear')
+
+
 
     df = df.interpolate(method='linear')
     list_of_dates = df['Date'].tolist()
     
+    df = df.interpolate(method='linear')
+    print("Interpolated DataFrame:")   
     
     idxx = 0
     df_weather_for_dates = pd.DataFrame()
