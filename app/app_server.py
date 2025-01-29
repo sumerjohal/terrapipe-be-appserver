@@ -2803,9 +2803,7 @@ def getWeatherFromNLDAS(agstack_geoid, start_date,end_date):
         lat, lon = extractLatLonFromWKT(wkt_polygon)
         start_time = time.time()
         # Get the list of S2 indices and CIDs for the data point
-        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-        print(f'token---{s2_index__L5_list}')
-        
+        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])        
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                         if os.path.exists(filePath + 's2_token_L5=' + x)]
         if not list_of_5_paths:
@@ -3473,7 +3471,7 @@ def getWeatherFromNOAA(agstack_geoid, start_date, end_date):
 
     list_of_3_paths = [filePath + 's2_index__L3=' + x for x in s2_index__L3_list
             if os.path.exists(filePath + 's2_index__L3=' + x)]
-    print(list_of_3_paths)
+
     if not list_of_3_paths:
         return empty_response()
     
@@ -3708,7 +3706,6 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
         start_time = time.time()
         # Get the list of S2 indices and CIDs for the data point
         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-        print(f'token---{s2_index__L5_list}')
         
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                         if os.path.exists(filePath + 's2_token_L5=' + x)]
@@ -4093,26 +4090,23 @@ def getEtoFromWeatherData(agstack_geoid, start_date, end_date):
     
     return eto_result
 
-def getEtoFromWeatherDataByDate(agstack_geoid, start_date, end_date):
+def getEtoFromWeatherDataByDate(agstack_geoid, start_date, end_date=None):
     # Define file paths
     file_paths = {
-        'AUS': '/media/rnaura/39d0b9c2-7989-4209-8972-db13745755e9/mnt/md0/AUS_TEST/DAILY/PARQUET_S2/',
-        'AUS_FORECAST': '/media/rnaura/39d0b9c2-7989-4209-8972-db13745755e9/mnt/md0/AUS_TEST/FORECASTED/PARQUET_S2/',
+        'AUS': '/network/AUS/DAILY/PARQUET_S2/',
         'NCEP': '/network/NCEP/',
         'NLDAS': '/network/NLDAS/',
         'NOAA': '/network/NOAA/PARQUET_S2/',
-        'NOAA_FORECAST': '/network/NOAA/FORECASTED/PARQUET_S2/',
         'GLOBAL': '/network/GHCND/PARQUET_S2/',
         'CIMIS': '/network/CIMIS/HOURLY/PARQUET_S2/',
     }
+
     # Define functions for each source
     fetch_funcs = {
         'AUS': getEtoFromAUS,
-        # 'AUS_FORECAST': getEtoFromAUSForecast,
         'NCEP': getEtoFromNCEP,
         'NLDAS': getEtoFromNLDAS,
         'NOAA': getEtoFromNOAA,
-        # 'NOAA_FORECAST': getEtoFromNOAAForecast,
         'GLOBAL': getEtoFromGHCND,
         'CIMIS': getEToFromCIMIS,
     }
@@ -4122,35 +4116,32 @@ def getEtoFromWeatherDataByDate(agstack_geoid, start_date, end_date):
     lat, lon = extractLatLonFromWKT(wkt_polygon)
 
     # Create date range
-    date_range = [pd.to_datetime(start_date)] if end_date is None else pd.date_range(start=start_date, end=end_date, freq='D')
+    date_range = pd.date_range(start=start_date, end=end_date if end_date else start_date, freq='D')
+
+    # Function to fetch ETo data for a single source and date
+    def fetch_eto_for_source(source_name, fetch_func, date_str):
+        file_path = file_paths[source_name]
+        eto_data = fetch_func(lat, lon, file_path, date_str, date_str)
+        if not eto_data.empty:
+            eto_value = eto_data['ETo_AVG_IN'].iloc[0]
+            if 0 <= eto_value <= 1:  # Filter valid ETo values
+                return eto_value
+        return None
 
     # Initialize result dictionary
     eto_result = {}
 
-    # Iterate over each date in the range
-    for date in date_range:
-        date_str = date.strftime('%Y-%m-%d')
-        eto_values = []
+    # Process all dates in parallel
+    with ThreadPoolExecutor() as executor:
+        for date in date_range:
+            date_str = date.strftime('%Y-%m-%d')
+            futures = [executor.submit(fetch_eto_for_source, source_name, fetch_func, date_str) 
+                       for source_name, fetch_func in fetch_funcs.items()]
+            eto_values = [future.result() for future in futures if future.result() is not None]
 
-        # Process all sources
-        for source_name, fetch_func in fetch_funcs.items():
-            file_path = file_paths[source_name]
-            eto_data = fetch_func(lat, lon, file_path, date_str, date_str)
-
-            # Check for valid data
-            if not eto_data.empty:
-                eto_value = eto_data['ETo_AVG_IN'].iloc[0]
-                if 0 <= eto_value <= 1:  # Filter valid ETo values
-                    eto_values.append(eto_value)
-
-        # Calculate the average ETo
-        if eto_values:
-            average_eto = round(np.mean(eto_values), 2)
-        else:
-            average_eto = 0  # Default if no valid ETo values
-
-        # Add the result for the date
-        eto_result[date_str] = [{'average_eto': average_eto}]
+            # Calculate the average ETo
+            average_eto = round(np.mean(eto_values), 2) if eto_values else 0
+            eto_result[date_str] = [{'average_eto': average_eto}]
 
     # Ensure all dates are included
     for date in date_range:
@@ -4158,7 +4149,6 @@ def getEtoFromWeatherDataByDate(agstack_geoid, start_date, end_date):
         eto_result.setdefault(date_str, [{'average_eto': 0}])
 
     return eto_result
-    
 
 def getWeatherEtoForEtc(agstack_geoid, start_date, end_date):
 
@@ -4780,8 +4770,6 @@ def getWeatherFromCIMIS(agstack_geoid, start_date, end_date):
         start_time = time.time()
 
         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-        print(f'token---{s2_index__L5_list}')
-
         list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
                            if os.path.exists(filePath + 's2_token_L5=' + x)]
         if not list_of_5_paths:
@@ -4992,60 +4980,157 @@ def getWeatherFromJRC(agstack_geoid):
         res_df["TMF_UAD"] = res_df["TMF_UAD"].apply(format_tmf_uad)
 
     return res_df
+
+def weatherMetadata():
+    metadata = {
+        "time": "datetime (UTC)",
+        "T_mean": "K",
+        "T_max": "K",
+        "T_min": "K",
+        "GUST_surface": "m/s",
+        "PRATE_surface": "kg/m^2/s",
+        "RH_2maboveground": "%",
+        "DPT_2maboveground": "K",
+        "ULWRF_surface": "W/m^2",
+        "USWRF_surface": "W/m^2",
+        "DLWRF_surface": "W/m^2",
+        "DSWRF_surface": "W/m^2",
+        "TSOIL_0D1M0D4mbelowground": "K",
+        "TSOIL_0D4M1mbelowground": "K",
+        "TSOIL_0M0D1mbelowground": "K",
+        "Avg_Eto":"inches",
+        "WindRun":"m/s"
+    }
+    
+    return metadata
+
+def weatherMetadata_desc():
+    metadata_desc = {
+        "time": "Timestamp in Coordinated Universal Time (UTC).",
+        "T_mean": "Mean Air Temperature at 2 meters above ground.",
+        "T_max": "Maximum Air Temperature at 2 meters above ground.",
+        "T_min": "Minimum Air Temperature at 2 meters above ground.",
+        "GUST_surface": "Wind speed (gust) at the surface.",
+        "PRATE_surface": "Precipitation rate at the surface.",
+        "RH_2maboveground": "Relative Humidity at 2 meters above ground.",
+        "DPT_2maboveground": "Dew Point Temperature at 2 meters above ground.",
+        "ULWRF_surface": "Upward Longwave Radiation Flux at the surface.",
+        "USWRF_surface": "Upward Shortwave Radiation Flux at the surface.",
+        "DLWRF_surface": "Downward Longwave Radiation Flux at the surface.",
+        "DSWRF_surface": "Downward Shortwave Radiation Flux at the surface.",
+        "TSOIL_0D1M0D4mbelowground": "Soil Temperature at 0.1 to 0.4 meters below ground.",
+        "TSOIL_0D4M1mbelowground": "Soil Temperature at 0.4 to 1 meter below ground.",
+        "TSOIL_0M0D1mbelowground": "Soil Temperature at 0 to 0.1 meters below ground.",
+        "Avg_Eto": "Average Evapotranspiration (in inches).",  
+        "WindRun": "Wind Run (in m/s), the total distance the wind has traveled."
+    }
+    
+    return metadata_desc
    
 # Get average weather data from all sources
-def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    # Retrieve data from various sources
-    ncep_data_dict = getWeatherFromNCEP(geoid, start_date, end_date)
-    aus_df = getWeatherFromAUS(geoid, start_date, end_date)
-    aus_forecast_df = getWeatherFromAUSFORECASTED(geoid, start_date, end_date)
-    noaa_df = getWeatherFromNOAA(geoid, start_date, end_date)
-    noaa_forecast_df = getWeatherFromNOAAFORECASTED(geoid, start_date, end_date)
-    global_df = getWeatherFromGHCND(geoid, start_date, end_date)
-    ncep_df = pd.DataFrame(ncep_data_dict)
-    nldas_data = getWeatherFromNLDAS(geoid, start_date, end_date)
+# def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
+#     end_date = datetime.now().strftime('%Y-%m-%d')
+#     # Retrieve data from various sources
+#     ncep_df = getWeatherFromNCEP(geoid, start_date, end_date)
+#     aus_df = getWeatherFromAUS(geoid, start_date, end_date)
+#     noaa_df = getWeatherFromNOAA(geoid, start_date, end_date)
+#     global_df = getWeatherFromGHCND(geoid, start_date, end_date)
+#     nldas_data = getWeatherFromNLDAS(geoid, start_date, end_date)
     
+#     # Concatenate all DataFrames
+#     dataframes = [ncep_df, nldas_data, aus_df, noaa_df, global_df]
+#     merged_df = pd.concat(dataframes, ignore_index=True)
+
+#     # Check for dictionary-like columns
+#     for column in merged_df.columns:
+#         if isinstance(merged_df[column].iloc[0], dict):
+#             # Flatten the dictionary into separate columns
+#             flattened = merged_df[column].apply(pd.Series)
+#             merged_df = pd.concat([merged_df, flattened], axis=1).drop(columns=[column])
+
+#     # Perform additional cleaning
+#     merged_df = merged_df.drop_duplicates().fillna(method='ffill')
+#     # Get weather data for geoid
+#     f_df = getWeatherForGeoid(merged_df, geoid)
+
+#     # Rename 'Date' to 'date'
+#     if 'Date' in f_df.columns:
+#         f_df.rename(columns={'Date': 'date'}, inplace=True)
+
+#     # Ensure 'date' is a datetime object
+#     f_df['date'] = pd.to_datetime(f_df['date'])
+
+#     # Extract time component (if needed) and create an hour column
+#     f_df['time'] = f_df['date'].dt.time  # Extract time as HH:MM:SS
+#     f_df['hour'] = f_df['date'].dt.hour  # Extract hour for grouping
+    
+#     result = {}
+
+#     # Group by date and hour
+#     for (date, hour), group in f_df.groupby([f_df['date'].dt.date, 'hour']):
+#         date_str = str(date)  # Convert to string format YYYY-MM-DD
+#         if date_str not in result:
+#             result[date_str] = []
+#         # Add hourly data as a dictionary
+#         result[date_str].append(group.drop(columns=['date', 'time']).to_dict(orient='records')[0])
+
+#     return result
+
+from concurrent.futures import ThreadPoolExecutor
+
+def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dict:
+    # Set end_date to today if not provided
+    end_date = datetime.now().strftime('%Y-%m-%d') if end_date is None else end_date
+
+    # List of functions to retrieve weather data
+    weather_functions = [
+        getWeatherFromNCEP,
+        getWeatherFromAUS,
+        getWeatherFromNOAA,
+        getWeatherFromGHCND,
+        getWeatherFromNLDAS
+    ]
+
+    # Use ThreadPoolExecutor to parallelize API calls
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(func, geoid, start_date, end_date) for func in weather_functions]
+        dataframes = [future.result() for future in futures]
+
     # Concatenate all DataFrames
-    dataframes = [ncep_df, nldas_data, aus_df, aus_forecast_df, noaa_df, noaa_forecast_df, global_df]
     merged_df = pd.concat(dataframes, ignore_index=True)
 
-    # Check for dictionary-like columns
+    # Flatten dictionary-like columns
     for column in merged_df.columns:
         if isinstance(merged_df[column].iloc[0], dict):
-            # Flatten the dictionary into separate columns
             flattened = merged_df[column].apply(pd.Series)
             merged_df = pd.concat([merged_df, flattened], axis=1).drop(columns=[column])
 
     # Perform additional cleaning
     merged_df = merged_df.drop_duplicates().fillna(method='ffill')
-# Get weather data for geoid
+
+    # Get weather data for geoid
     f_df = getWeatherForGeoid(merged_df, geoid)
 
-    # Rename 'Date' to 'date'
+    # Rename 'Date' to 'date' if present
     if 'Date' in f_df.columns:
         f_df.rename(columns={'Date': 'date'}, inplace=True)
 
     # Ensure 'date' is a datetime object
     f_df['date'] = pd.to_datetime(f_df['date'])
 
-    # Extract time component (if needed) and create an hour column
-    f_df['time'] = f_df['date'].dt.time  # Extract time as HH:MM:SS
-    f_df['hour'] = f_df['date'].dt.hour  # Extract hour for grouping
-
-    result = {}
+    # Extract time component and create an hour column
+    f_df['hour'] = f_df['date'].dt.hour
 
     # Group by date and hour
+    result = {}
     for (date, hour), group in f_df.groupby([f_df['date'].dt.date, 'hour']):
-        date_str = str(date)  # Convert to string format YYYY-MM-DD
+        date_str = str(date)
         if date_str not in result:
             result[date_str] = []
         # Add hourly data as a dictionary
-        result[date_str].append(group.drop(columns=['date', 'time']).to_dict(orient='records')[0])
-    
+        result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
+
     return result
-
-
 
 # def reload_gunicorn_workers():
 #     print("Reloading Gunicorn workers...")
@@ -6103,8 +6188,8 @@ def getWeatherfunc():
 
     response = {
         "data": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
-        # "metadata": get_jrc_metadata(),
-        # "metadata-description": get_jrc_description(),
+        "metadata": weatherMetadata(),
+        "metadata-description": weatherMetadata_desc()
     }
 
     return jsonify(response)

@@ -12850,8 +12850,8 @@ def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
     
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    # s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    # s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
     # print(s2_index__L5_list)
     # print(s2_index__L7_list)
@@ -12861,16 +12861,28 @@ def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
     list_of_L7_paths = []
     list_of_L9_paths = []
     
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    list_of_L5_paths = [os.path.join(filePath, f's2_token_L5={x}') for x in s2_index__L5_list if os.path.exists(os.path.join(filePath, f's2_token_L5={x}'))]
+  
+    list_of_L7_paths = [
+        os.path.join(L5_path, f's2_token_L7={x}')
+        for L5_path in list_of_L5_paths
+        for x in s2_index__L7_list if os.path.exists(os.path.join(L5_path, f's2_token_L7={x}'))
+    ]
+
+    list_of_L9_paths = [
+        os.path.join(L7_path, f's2_token_L9={x}')
+        for L7_path in list_of_L7_paths
+        for x in s2_index__L9_list if os.path.exists(os.path.join(L7_path, f's2_token_L9={x}'))
+    ]
     
     weather_datasets = []
         
-    for x in list_of_L5_paths:
+    for x in list_of_L9_paths:
         weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     
     #get the Data
     w_all = pd.DataFrame()
+    w_ret = pd.DataFrame()
     for weatherDataset in weather_datasets:
         """
         dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
@@ -12886,49 +12898,73 @@ def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
         
         dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
         try:
+            weather_datasets = []
+                
+            for x in list_of_L5_paths:
+                weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
             
-            weather_df = weatherDataset.to_table(
-                columns=['Year','Month','Day','ETo_AVG_IN'],
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()
+            #get the Data
+            for weatherDataset in weather_datasets:
+                """
+                dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+                if os.path.exists(dataPath):
+                    dataDir = dataPath
+                else:
+                    dataDir = []
+                    return []
+                
+                #get the parquet dataset from the directory
+                weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+                """
+                
+                dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
 
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+                    
+                weather_df = weatherDataset.to_table(
+                    columns=['Year','Month','Day','ETo_AVG_IN','ETo_FAO_MM','ETo_HAR_MM'],
+                    filter=(
+                        (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+                        (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+                        (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+                    )
+                ).to_pandas()
 
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
+                weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_MM']
+                weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_MM']
+                #get the DataFrame for the average of that day
+                weather_df['YYYY']=weather_df['Year'].astype(str)
+                weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+                weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
 
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-            w_df['Date']=dt
+                weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+                weather_df.Date = pd.to_datetime(weather_df.Date)
 
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-            
+                weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+                w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+                w_df['Date']=dt
+
+                cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
+                w_df = w_df[cols]
+                w_all = pd.concat([w_all, w_df], ignore_index=True)
+                    
+            if len(w_all) > 0:
+                w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+                w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+
+                if not w_all.empty:
+                    # Take the average of the columns
+                    w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+                    w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
+                    w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
+                    w_ret.reset_index(inplace=True)
+                else:
+                    w_ret = pd.DataFrame()
+            else:
+                w_ret = pd.DataFrame()
+
         except Exception as e:
             print(e)
-    
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
-    else:
-        w_ret = pd.DataFrame()
-
-    
+        
     end_time = time.time()
     time_elapsed = (end_time - start_time)
     
@@ -12951,18 +12987,33 @@ def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
         end_DD_str = int(end_tok[2])
         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
         utc_end_dt = pytz.utc.localize(end_local_dt)
-    
-    
+
     #get the list of S2 indeces and CIDs for the data point
     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    list_of_L5_paths = []
-
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
-    weather_datasets = []
-    for x in list_of_L5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    # print(s2_index__L5_list)
+    # print(s2_index__L7_list)
+    # print(s2_index__L9_list)
+
+    list_of_L5_paths = []
+    list_of_L7_paths = []
+    list_of_L9_paths = []
+    
+    list_of_L5_paths = [os.path.join(filePath, f's2_token_L5={x}') for x in s2_index__L5_list if os.path.exists(os.path.join(filePath, f's2_token_L5={x}'))]
+  
+    list_of_L7_paths = [
+        os.path.join(L5_path, f's2_token_L7={x}')
+        for L5_path in list_of_L5_paths
+        for x in s2_index__L7_list if os.path.exists(os.path.join(L5_path, f's2_token_L7={x}'))
+    ]
+
+    list_of_L9_paths = [
+        os.path.join(L7_path, f's2_token_L9={x}')
+        for L7_path in list_of_L7_paths
+        for x in s2_index__L9_list if os.path.exists(os.path.join(L7_path, f's2_token_L9={x}'))
+    ]
     
     #get the Data
     w_all = pd.DataFrame()
@@ -13031,99 +13082,78 @@ def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
     return  w_ret
 
 def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
-    lats = [lat]
-    lons = [lon]
     start_time = time.time()
 
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    # Parse start and end dates
+    start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+    end_date_obj = datetime.strptime(end_date, '%Y-%m-%d') if end_date else None
 
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
+    # Generate paths for L5, L7, and L9 tokens
+    def generate_paths(level, parent_paths, indices):
+        return [
+            os.path.join(parent_path, f's2_token_L{level}={index}')
+            for parent_path in parent_paths
+            for index in indices
+            if os.path.exists(os.path.join(parent_path, f's2_token_L{level}={index}'))
+        ]
 
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
-        
-    list_of_L5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list if os.path.exists(filePath + 's2_token_L5=' + x)]
+    s2_index__L5_list, _ = get_s2_cellids_and_token_list(5, [lat], [lon])
+    list_of_L5_paths = [
+        os.path.join(filePath, f's2_token_L5={x}')
+        for x in s2_index__L5_list
+        if os.path.exists(os.path.join(filePath, f's2_token_L5={x}'))
+    ]
 
-    weather_datasets = []
-    for x in list_of_L5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    s2_index__L7_list, _ = get_s2_cellids_and_token_list(7, [lat], [lon])
+    list_of_L7_paths = generate_paths(7, list_of_L5_paths, s2_index__L7_list)
 
-    # Get the data
-    w_all = pd.DataFrame()
+    s2_index__L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
+    list_of_L9_paths = generate_paths(9, list_of_L7_paths, s2_index__L9_list)
+
+    # Load and process datasets
+    w_all = []
+
     try:
-        for weatherDataset in weather_datasets:
-            # List the columns available in the dataset to identify the correct field name
-            # print(f"Columns in dataset: {weatherDataset.schema}")
+        for path in list_of_L9_paths:
+            dataset = ds.dataset(path, format="parquet", partitioning="hive")
             
-            yrStr = YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-
-            dt = datetime.strptime(yrStr + '-' + moStr + '-' + dtStr, '%Y-%m-%d')
-
-            # Adjust the field name to match the actual column names in the dataset
-            weather_df = weatherDataset.to_table(
-                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN'],  # Correct column name here
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
+            # Filter and load relevant data
+            filters = (
+                (ds.field('Year') >= start_date_obj.year) & (ds.field('Year') <= end_date_obj.year) &
+                (ds.field('Month') >= start_date_obj.month) & (ds.field('Month') <= end_date_obj.month) &
+                (ds.field('Day') >= start_date_obj.day) & (ds.field('Day') <= end_date_obj.day)
+            )
+            table = dataset.to_table(
+                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN', 'ETo_FAO_IN', 'ETo_HAR_IN'],
+                filter=filters
             ).to_pandas()
 
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+            # Process the DataFrame
+            if not table.empty:
+                table['Date'] = pd.to_datetime(
+                    table[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+                )
+                table['ETo_FAO_mm'] = table['ETo_FAO_IN'] * 25.4
+                table['ETo_HAR_mm'] = table['ETo_HAR_IN'] * 25.4
 
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
+                # Aggregate by Date
+                daily_avg = table.groupby('Date', as_index=False).agg({
+                    'ETo_AVG_IN': 'mean',
+                    'ETo_FAO_mm': 'mean',
+                    'ETo_HAR_mm': 'mean'
+                })
+                w_all.append(daily_avg)
 
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-                    # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
-            
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
-                continue
-            
-            w_df['Date']=dt
-
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        w_ret=pd.DataFrame()    
-    
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
-
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
+        # Combine all results
+        if w_all:
+            w_ret = pd.concat(w_all).groupby('Date', as_index=False).mean()
         else:
-            w_ret = pd.DataFrame()
-    else:
-        w_ret = pd.DataFrame()
+            w_ret = pd.DataFrame(columns=['Date', 'ETo_AVG_IN', 'ETo_FAO_mm', 'ETo_HAR_mm'])
 
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
+    except Exception as e:
+        print(f"Error processing data: {e}")
+        w_ret = pd.DataFrame()
+        
     return w_ret
 
 def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
@@ -13165,8 +13195,9 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     for x in list_of_L5_paths:
         weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
     #get the Data
+    w_all = pd.DataFrame()
+    w_ret = pd.DataFrame()
     try:
-        w_all = pd.DataFrame()
         for weatherDataset in weather_datasets:
             """
             dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
@@ -13232,119 +13263,105 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     
     return w_ret
 
-def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
-    lats=[lat]
-    lons=[lon]
+import os
+import time
+import pytz
+import pandas as pd
+from datetime import datetime
+import pyarrow.dataset as ds
+
+
+def getEtoFromNOAA(lat, lon, filePath, start_date, end_date=None):
     start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
     
-    #print(s2_index__L3_list)
-    # print(f'NOAA DAily-{s2_index__L3_list}')
-    #print(s2_index__L8_list)
+    # Get the list of S2 indices and CIDs for the data point
+    s2_index__L3_list, _ = get_s2_cellids_and_token_list(3, [lat], [lon])
+    s2_index__L5_list, _ = get_s2_cellids_and_token_list(5, [lat], [lon])
+    s2_index__L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
     
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-    
+    # Parse start and end dates
+    start_date = datetime.strptime(start_date, '%Y-%m-%d')
     if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').astimezone(pytz.utc)
+    else:
+        end_date = start_date.astimezone(pytz.utc)
 
-    list_of_L3_paths = []
-    
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
+    # Generate paths for L3, L5, and L8 tokens
+    list_of_L3_paths = [
+        os.path.join(filePath, f's2_index__L3={x}')
+        for x in s2_index__L3_list
+        if os.path.exists(os.path.join(filePath, f's2_index__L3={x}'))
+    ]
 
-    list_of_L3_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
-                        if os.path.exists(filePath+'s2_index__L3='+x)]
-    
-    
-    weather_datasets = []
-        
-    for x in list_of_L3_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-    #get the Data
-    w_all = pd.DataFrame()
+    list_of_L5_paths = [
+        os.path.join(L3_path, f's2_index__L5={x}')
+        for L3_path in list_of_L3_paths
+        for x in s2_index__L5_list
+        if os.path.exists(os.path.join(L3_path, f's2_index__L5={x}'))
+    ]
+
+    list_of_L8_paths = [
+        os.path.join(L5_path, f's2_index__L8={x}')
+        for L5_path in list_of_L5_paths
+        for x in s2_index__L8_list
+        if os.path.exists(os.path.join(L5_path, f's2_index__L8={x}'))
+    ]
+
+    # Load datasets
+    weather_datasets = [
+        ds.dataset(path, format="parquet", partitioning="hive")
+        for path in list_of_L3_paths
+    ]
+
+    # Initialize results
+    w_all = []
+
     try:
-        
         for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
-            
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            yrStr=  YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
-            
-            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
-
-                
-            weather_df = weatherDataset.to_table(
-                columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN'],  # Use the correct column name
+            # Filter dataset directly within PyArrow
+            table = weatherDataset.to_table(
+                columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN', 'ETo_FAO_inches', 'ETo_HAR_inches'],
                 filter=(
-                    (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= int(end_YYYY_str)) &
-                    (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= int(end_MM_str)) &
-                    (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= int(end_DD_str))
+                    (ds.field('YYYY') >= start_date.year) & (ds.field('YYYY') <= end_date.year) &
+                    (ds.field('MM') >= start_date.month) & (ds.field('MM') <= end_date.month) &
+                    (ds.field('DD') >= start_date.day) & (ds.field('DD') <= end_date.day)
                 )
-            ).to_pandas()
+            )
 
-
-            # #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['YYYY'].astype(str)
-            weather_df['MM']=weather_df['MM'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['DD'].astype(str).str.zfill(2)
-
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
-
-            # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
-            
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
+            # Convert table to DataFrame
+            weather_df = table.to_pandas()
+            if weather_df.empty:
                 continue
-            w_df['Date']=dt
 
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
-    except Exception as e:
-        w_ret = pd.DataFrame()
-    
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+            # Convert ETo columns to mm
+            weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_inches'] * 25.4
+            weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_inches'] * 25.4
 
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
+            # Format date
+            weather_df['Date'] = pd.to_datetime(weather_df[['YYYY', 'MM', 'DD']])
+
+            # Calculate daily mean
+            numeric_cols = weather_df.select_dtypes(include=['number'])
+            if not numeric_cols.empty:
+                w_df = numeric_cols.mean().to_frame().T
+                w_df['Date'] = weather_df['Date'].iloc[0]
+                w_all.append(w_df)
+
+        # Combine and process results
+        if w_all:
+            w_all = pd.concat(w_all, ignore_index=True)
+            w_ret = w_all.groupby('Date', as_index=False).mean()
+            w_ret = w_ret[['Date', 'ETo_AVG_IN', 'ETo_FAO_mm', 'ETo_HAR_mm']]
         else:
             w_ret = pd.DataFrame()
-    else:
+
+    except Exception as e:
+        print(e)
         w_ret = pd.DataFrame()
 
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
+    print(f"Execution Time: {time.time() - start_time:.2f} seconds")
     return w_ret
+
     
 
 def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
@@ -13456,111 +13473,80 @@ def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
     return w_ret
 
 
-def getEtoFromGHCND(lat, lon, filePath, start_date,end_date):
-    lats=[lat]
-    lons=[lon]
-    
-    #Parse the date
-    
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
-    
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
+import os
+import time
+from datetime import datetime
+import pytz
+import pandas as pd
+import pyarrow.dataset as ds
+from concurrent.futures import ThreadPoolExecutor
+
+def getEtoFromGHCND(lat, lon, filePath, start_date, end_date=None):
+    # Parse start and end dates
+    start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    end_date = datetime.strptime(end_date, '%Y-%m-%d') if end_date else None
+
+    # Get the S2 indices and CIDs for the data point
+    s2_index_L5_list, _ = get_s2_cellids_and_token_list(5, [lat], [lon])
+    s2_index_L7_list, _ = get_s2_cellids_and_token_list(7, [lat], [lon])
+    s2_index_L9_list, _ = get_s2_cellids_and_token_list(9, [lat], [lon])
+
+    # Generate file paths
+    def filter_paths(level, parent_paths, indices):
+        return [
+            os.path.join(parent_path, f's2_token_L{level}={idx}')
+            for parent_path in parent_paths
+            for idx in indices
+            if os.path.exists(os.path.join(parent_path, f's2_token_L{level}={idx}'))
+        ]
+
     start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    
 
-    # print(s2_index__L5_list)
-    # print(s2_index__L7_list)
-    # print(s2_index__L9_list)
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
+    # Generate paths for L5, L7, and L9 tokens
+    list_of_L5_paths = filter_paths(5, [filePath], s2_index_L5_list)
+    list_of_L7_paths = filter_paths(7, list_of_L5_paths, s2_index_L7_list)
+    list_of_L9_paths = filter_paths(9, list_of_L7_paths, s2_index_L9_list)
 
+    # Load datasets
+    weather_datasets = [ds.dataset(path, format="parquet", partitioning="hive") for path in list_of_L9_paths]
 
-    list_of_L5_paths = []
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
+    # Filter and process datasets
+    date_filter = (
+        (ds.field('Year') >= start_date.year) & 
+        (ds.field('Month') >= start_date.month) & 
+        (ds.field('Day') >= start_date.day)
+    )
+    if end_date:
+        date_filter = date_filter & (
+            (ds.field('Year') <= end_date.year) & 
+            (ds.field('Month') <= end_date.month) & 
+            (ds.field('Day') <= end_date.day)
+        )
 
-    
-    weather_datasets = []
-    for x in list_of_L5_paths:
-        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
-    #get the Data
-    w_all = pd.DataFrame()
-    for weatherDataset in weather_datasets:
-        """
-        dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-        if os.path.exists(dataPath):
-            dataDir = dataPath
-        else:
-            dataDir = []
-            return []
-        
-        #get the parquet dataset from the directory
-        weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-        """
-        yrStr=  YYYY_str
-        moStr = MM_str
-        dtStr = DD_str
-        
-        dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+    all_data = []
+    for weather_dataset in weather_datasets:
         try:
-            
-            weather_df = weatherDataset.to_table(
-                columns=['Year','Month','Day','ETo_AVG_IN'],
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()
-
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
-
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
-
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-            w_df['Date']=dt
-
-            cols = ['Date','ETo_AVG_IN']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
+            table = weather_dataset.to_table(
+                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN'],
+                filter=date_filter
+            )
+            df = table.to_pandas()
+            if not df.empty:
+                df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
+                daily_mean = df.groupby('Date')['ETo_AVG_IN'].mean().reset_index()
+                all_data.append(daily_mean)
         except Exception as e:
-            print(e)
-    
-    if len(w_all) > 0:
-        w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-        w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+            print(f"Error processing dataset: {e}")
 
-        if not w_all.empty:
-            # Take the average of the columns
-            w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-            w_ret.reset_index(inplace=True)
-        else:
-            w_ret = pd.DataFrame()
+    # Combine all data
+    if all_data:
+        w_ret = pd.concat(all_data, ignore_index=True).groupby('Date', as_index=False)['ETo_AVG_IN'].mean()
     else:
         w_ret = pd.DataFrame()
 
-    
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
-    
+    print(f"Processing time: {time.time() - start_time:.2f} seconds")
     return w_ret
+
 
 def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
           
@@ -13581,14 +13567,22 @@ def getEToFromCIMIS(lat, lon, filePath, start_date,end_date):
         utc_end_dt = pytz.utc.localize(end_local_dt)
     
     
-    ## Get S2 indices and CIDs
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-    
-    # Generate paths for available datasets
-    list_of_L5_paths = [
-        os.path.join(filePath, f"s2_token_L5={x}")
-        for x in s2_index__L5_list
-        if os.path.exists(os.path.join(filePath, f"s2_token_L5={x}"))
+    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+    s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+    s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+    # Generate paths for L5, L7, and L9 tokens
+    list_of_L5_paths = [os.path.join(filePath, f's2_token_L5={x}') for x in s2_index__L5_list if os.path.exists(os.path.join(filePath, f's2_token_L5={x}'))]
+  
+    list_of_L7_paths = [
+        os.path.join(L5_path, f's2_token_L7={x}')
+        for L5_path in list_of_L5_paths
+        for x in s2_index__L7_list if os.path.exists(os.path.join(L5_path, f's2_token_L7={x}'))
+    ]
+
+    list_of_L9_paths = [
+        os.path.join(L7_path, f's2_token_L9={x}')
+        for L7_path in list_of_L7_paths
+        for x in s2_index__L9_list if os.path.exists(os.path.join(L7_path, f's2_token_L9={x}'))
     ]
     
     # Load weather datasets
@@ -14011,7 +14005,6 @@ def extractLatLonFromWKT(wkt_polygon):
         # Extract the latitude and longitude from the centroid
         lat = c.y
         lon = c.x
-        print(lat, lon)
         return lat, lon
     except Exception as e:
         print(f"Error processing WKT with Shapely: {e}")
@@ -26857,113 +26850,113 @@ def getEToForArchiveObs(region_gdf):
 
 import time
 
-def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
-    lats=[lat]
-    lons=[lon]
-    start_time = time.time()
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
+# def getEtoFromNCEP(lat, lon, filePath, start_date, end_date):
+#     lats=[lat]
+#     lons=[lon]
+#     start_time = time.time()
+#     tok = start_date.split('-')
+#     YYYY_str = tok[0]
+#     MM_str = tok[1]
+#     DD_str = tok[2]
     
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
+#     if end_date:
+#         # Parse end date and localize it to UTC if provided
+#         end_tok = end_date.split('-')
+#         end_YYYY_str = int(end_tok[0])
+#         end_MM_str = int(end_tok[1])
+#         end_DD_str = int(end_tok[2])
+#         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+#         utc_end_dt = pytz.utc.localize(end_local_dt)
     
     
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
-    # s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
-    # s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
+#     #get the list of S2 indeces and CIDs for the data point
+#     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+#     # s2_index__L7_list, L7_cids = get_s2_cellids_and_token_list(7, lats, lons)
+#     # s2_index__L9_list, L9_cids = get_s2_cellids_and_token_list(9, lats, lons)
     
-    # print(s2_index__L5_list)
-    # print(s2_index__L7_list)
-    # print(s2_index__L9_list)
+#     # print(s2_index__L5_list)
+#     # print(s2_index__L7_list)
+#     # print(s2_index__L9_list)
 
-    list_of_L5_paths = []
-    list_of_L7_paths = []
-    list_of_L9_paths = []
+#     list_of_L5_paths = []
+#     list_of_L7_paths = []
+#     list_of_L9_paths = []
     
-    list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
-                        if os.path.exists(filePath+'s2_token_L5='+x)]
-    w_all = pd.DataFrame()
-    w_ret = pd.DataFrame()
-    try:
-        weather_datasets = []
+#     list_of_L5_paths = [filePath+'s2_token_L5='+x for x in s2_index__L5_list 
+#                         if os.path.exists(filePath+'s2_token_L5='+x)]
+#     w_all = pd.DataFrame()
+#     w_ret = pd.DataFrame()
+#     try:
+#         weather_datasets = []
             
-        for x in list_of_L5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+#         for x in list_of_L5_paths:
+#             weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
         
-        #get the Data
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
+#         #get the Data
+#         for weatherDataset in weather_datasets:
+#             """
+#             dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+#             if os.path.exists(dataPath):
+#                 dataDir = dataPath
+#             else:
+#                 dataDir = []
+#                 return []
             
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
+#             #get the parquet dataset from the directory
+#             weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+#             """
             
-            dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
+#             dt = datetime.strptime(YYYY_str+'-'+MM_str+'-'+DD_str, '%Y-%m-%d')
 
                 
-            weather_df = weatherDataset.to_table(
-                columns=['Year','Month','Day','ETo_AVG_IN','ETo_FAO_MM','ETo_HAR_MM'],
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()
+#             weather_df = weatherDataset.to_table(
+#                 columns=['Year','Month','Day','ETo_AVG_IN','ETo_FAO_MM','ETo_HAR_MM'],
+#                 filter=(
+#                     (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+#                     (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+#                     (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+#                 )
+#             ).to_pandas()
 
-            weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_MM']
-            weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_MM']
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+#             weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_MM']
+#             weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_MM']
+#             #get the DataFrame for the average of that day
+#             weather_df['YYYY']=weather_df['Year'].astype(str)
+#             weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+#             weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
 
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
+#             weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+#             weather_df.Date = pd.to_datetime(weather_df.Date)
 
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            w_df = pd.DataFrame(weather_df.mean(axis=0)).T
-            w_df['Date']=dt
+#             weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+#             w_df = pd.DataFrame(weather_df.mean(axis=0)).T
+#             w_df['Date']=dt
 
-            cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
+#             cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
+#             w_df = w_df[cols]
+#             w_all = pd.concat([w_all, w_df], ignore_index=True)
                 
-        if len(w_all) > 0:
-            w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-            w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+#         if len(w_all) > 0:
+#             w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+#             w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
 
-            if not w_all.empty:
-                # Take the average of the columns
-                w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-                w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
-                w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
-                w_ret.reset_index(inplace=True)
-            else:
-                w_ret = pd.DataFrame()
-        else:
-            w_ret = pd.DataFrame()
+#             if not w_all.empty:
+#                 # Take the average of the columns
+#                 w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+#                 w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
+#                 w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
+#                 w_ret.reset_index(inplace=True)
+#             else:
+#                 w_ret = pd.DataFrame()
+#         else:
+#             w_ret = pd.DataFrame()
 
-    except Exception as e:
-        print(e)
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
+#     except Exception as e:
+#         print(e)
+#     end_time = time.time()
+#     time_elapsed = (end_time - start_time)
     
-    return  w_ret
+#     return  w_ret
 
 def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
     lats=[lat]
@@ -27063,109 +27056,109 @@ def getEtoFromNLDAS(lat, lon, filePath, start_date, end_date=None):
     
     return  w_ret
 
-def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
-    lats = [lat]
-    lons = [lon]
-    start_time = time.time()
+# def getEtoFromAUS(lat, lon, filePath, start_date, end_date):
+#     lats = [lat]
+#     lons = [lon]
+#     start_time = time.time()
 
-    # Get the list of S2 indices and CIDs for the data point
-    s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
+#     # Get the list of S2 indices and CIDs for the data point
+#     s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, lats, lons)
 
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
+#     tok = start_date.split('-')
+#     YYYY_str = tok[0]
+#     MM_str = tok[1]
+#     DD_str = tok[2]
 
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
+#     if end_date:
+#         # Parse end date and localize it to UTC if provided
+#         end_tok = end_date.split('-')
+#         end_YYYY_str = int(end_tok[0])
+#         end_MM_str = int(end_tok[1])
+#         end_DD_str = int(end_tok[2])
+#         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+#         utc_end_dt = pytz.utc.localize(end_local_dt)
         
-    list_of_L5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list if os.path.exists(filePath + 's2_token_L5=' + x)]
+#     list_of_L5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list if os.path.exists(filePath + 's2_token_L5=' + x)]
     
-    w_all = pd.DataFrame()
-    w_ret = pd.DataFrame()
-    try:
-        weather_datasets = []
-        for x in list_of_L5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+#     w_all = pd.DataFrame()
+#     w_ret = pd.DataFrame()
+#     try:
+#         weather_datasets = []
+#         for x in list_of_L5_paths:
+#             weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-        for weatherDataset in weather_datasets:
-            # List the columns available in the dataset to identify the correct field name
-            # print(f"Columns in dataset: {weatherDataset.schema}")
+#         for weatherDataset in weather_datasets:
+#             # List the columns available in the dataset to identify the correct field name
+#             # print(f"Columns in dataset: {weatherDataset.schema}")
             
-            yrStr = YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
+#             yrStr = YYYY_str
+#             moStr = MM_str
+#             dtStr = DD_str
 
-            dt = datetime.strptime(yrStr + '-' + moStr + '-' + dtStr, '%Y-%m-%d')
+#             dt = datetime.strptime(yrStr + '-' + moStr + '-' + dtStr, '%Y-%m-%d')
 
-            # Adjust the field name to match the actual column names in the dataset
-            weather_df = weatherDataset.to_table(
-                columns=['Year', 'Month', 'Day', 'ETo_AVG_IN','ETo_FAO_inches','ETo_HAR_inches'],  # Correct column name here
-                filter=(
-                    (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
-                    (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
-                    (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
-                )
-            ).to_pandas()
+#             # Adjust the field name to match the actual column names in the dataset
+#             weather_df = weatherDataset.to_table(
+#                 columns=['Year', 'Month', 'Day', 'ETo_AVG_IN','ETo_FAO_IN','ETo_HAR_IN'],  # Correct column name here
+#                 filter=(
+#                     (ds.field('Year') >= int(YYYY_str)) & (ds.field('Year') <= end_YYYY_str) &
+#                     (ds.field('Month') >= int(MM_str)) & (ds.field('Month') <= end_MM_str) &
+#                     (ds.field('Day') >= int(DD_str)) & (ds.field('Day') <= end_DD_str)
+#                 )
+#             ).to_pandas()
             
-            print(f'AUS--{weather_df}')
+#             print(f'AUS--{weather_df}')
             
-            # Convert ETo_FAO_inches and ETo_HAR_inches to mm
-            weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_inches'] * 25.4
-            weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_inches'] * 25.4
+#             # Convert ETo_FAO_inches and ETo_HAR_inches to mm
+#             weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_inches'] * 25.4
+#             weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_inches'] * 25.4
 
 
-            #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['Year'].astype(str)
-            weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
+#             #get the DataFrame for the average of that day
+#             weather_df['YYYY']=weather_df['Year'].astype(str)
+#             weather_df['MM']=weather_df['Month'].astype(str).str.zfill(2)
+#             weather_df['DD']=weather_df['Day'].astype(str).str.zfill(2)
 
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
+#             weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+#             weather_df.Date = pd.to_datetime(weather_df.Date)
 
-            weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-                    # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
+#             weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+#                     # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+#             numeric_cols = weather_df.select_dtypes(include=['number']).columns
             
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
-                continue
+#             if not numeric_cols.empty:
+#                 w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+#             else:
+#                 print("No numeric columns found for mean calculation.")
+#                 continue
             
-            w_df['Date']=dt
+#             w_df['Date']=dt
 
-            cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True) 
+#             cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
+#             w_df = w_df[cols]
+#             w_all = pd.concat([w_all, w_df], ignore_index=True) 
         
-        if len(w_all) > 0:
-            w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-            w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+#         if len(w_all) > 0:
+#             w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+#             w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
 
-            if not w_all.empty:
-                # Take the average of the columns
-                w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-                w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
-                w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
-                w_ret.reset_index(inplace=True)
-            else:
-                w_ret = pd.DataFrame()
-        else:
-            w_ret = pd.DataFrame()
+#             if not w_all.empty:
+#                 # Take the average of the columns
+#                 w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+#                 w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
+#                 w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
+#                 w_ret.reset_index(inplace=True)
+#             else:
+#                 w_ret = pd.DataFrame()
+#         else:
+#             w_ret = pd.DataFrame()
 
-    except Exception as e:
-        print(e)
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
+#     except Exception as e:
+#         print(e)
+#     end_time = time.time()
+#     time_elapsed = (end_time - start_time)
     
-    return w_ret
+#     return w_ret
 
 def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     lats=[lat]
@@ -27281,124 +27274,124 @@ def getEtoFromAUSForecast(lat, lon, filePath,start_date,end_date):
     
     return w_ret
 
-def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
-    lats=[lat]
-    lons=[lon]
-    start_time = time.time()
-    #get the list of S2 indeces and CIDs for the data point
-    s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
+# def getEtoFromNOAA(lat, lon, filePath,start_date,end_date):
+#     lats=[lat]
+#     lons=[lon]
+#     start_time = time.time()
+#     #get the list of S2 indeces and CIDs for the data point
+#     s2_index__L3_list, L3_cids = get_s2_cellids_and_token_list(3, lats, lons)
     
-    #print(s2_index__L3_list)
-    # print(f'NOAA DAily-{s2_index__L3_list}')
-    #print(s2_index__L8_list)
+#     #print(s2_index__L3_list)
+#     # print(f'NOAA DAily-{s2_index__L3_list}')
+#     #print(s2_index__L8_list)
     
-    tok = start_date.split('-')
-    YYYY_str = tok[0]
-    MM_str = tok[1]
-    DD_str = tok[2]
+#     tok = start_date.split('-')
+#     YYYY_str = tok[0]
+#     MM_str = tok[1]
+#     DD_str = tok[2]
     
-    if end_date:
-        # Parse end date and localize it to UTC if provided
-        end_tok = end_date.split('-')
-        end_YYYY_str = int(end_tok[0])
-        end_MM_str = int(end_tok[1])
-        end_DD_str = int(end_tok[2])
-        end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
-        utc_end_dt = pytz.utc.localize(end_local_dt)
+#     if end_date:
+#         # Parse end date and localize it to UTC if provided
+#         end_tok = end_date.split('-')
+#         end_YYYY_str = int(end_tok[0])
+#         end_MM_str = int(end_tok[1])
+#         end_DD_str = int(end_tok[2])
+#         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
+#         utc_end_dt = pytz.utc.localize(end_local_dt)
 
-    list_of_L3_paths = []
+#     list_of_L3_paths = []
     
-    # s2_index__L7_list = ['8099c']
-    # s2_index__L9_list = ['8099bc']
+#     # s2_index__L7_list = ['8099c']
+#     # s2_index__L9_list = ['8099bc']
 
-    list_of_L3_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
-                        if os.path.exists(filePath+'s2_index__L3='+x)]
+#     list_of_L3_paths = [filePath+'s2_index__L3='+x for x in s2_index__L3_list 
+#                         if os.path.exists(filePath+'s2_index__L3='+x)]
     
     
-    weather_datasets = []
+#     weather_datasets = []
     
-    w_all = pd.DataFrame()
-    w_ret = pd.DataFrame()
-    try:
+#     w_all = pd.DataFrame()
+#     w_ret = pd.DataFrame()
+#     try:
             
-        for x in list_of_L3_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+#         for x in list_of_L3_paths:
+#             weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-        for weatherDataset in weather_datasets:
-            """
-            dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
-            if os.path.exists(dataPath):
-                dataDir = dataPath
-            else:
-                dataDir = []
-                return []
+#         for weatherDataset in weather_datasets:
+#             """
+#             dataPath = filePath+'s2_index__L3='+s2_index__L3_list[0]+'/s2_index__L5='+s2_index__L5_list[0]+'/s2_index__L8='+s2_index__L8_list[0] 
+#             if os.path.exists(dataPath):
+#                 dataDir = dataPath
+#             else:
+#                 dataDir = []
+#                 return []
             
-            #get the parquet dataset from the directory
-            weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
-            """
-            yrStr=  YYYY_str
-            moStr = MM_str
-            dtStr = DD_str
+#             #get the parquet dataset from the directory
+#             weatherDataset = ds.dataset(dataDir,format="parquet", partitioning="hive")
+#             """
+#             yrStr=  YYYY_str
+#             moStr = MM_str
+#             dtStr = DD_str
             
-            dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
+#             dt = datetime.strptime(yrStr+'-'+moStr+'-'+dtStr, '%Y-%m-%d')
 
                 
-            weather_df = weatherDataset.to_table(
-                columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN','ETo_FAO_inches','ETo_HAR_inches'],  # Use the correct column name
-                filter=(
-                    (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= int(end_YYYY_str)) &
-                    (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= int(end_MM_str)) &
-                    (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= int(end_DD_str))
-                )
-            ).to_pandas()
-            # Convert ETo_FAO_inches and ETo_HAR_inches to mm
-            weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_inches'] * 25.4
-            weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_inches'] * 25.4
+#             weather_df = weatherDataset.to_table(
+#                 columns=['YYYY', 'MM', 'DD', 'ETo_AVG_IN','ETo_FAO_inches','ETo_HAR_inches'],  # Use the correct column name
+#                 filter=(
+#                     (ds.field('YYYY') >= int(YYYY_str)) & (ds.field('YYYY') <= int(end_YYYY_str)) &
+#                     (ds.field('MM') >= int(MM_str)) & (ds.field('MM') <= int(end_MM_str)) &
+#                     (ds.field('DD') >= int(DD_str)) & (ds.field('DD') <= int(end_DD_str))
+#                 )
+#             ).to_pandas()
+#             # Convert ETo_FAO_inches and ETo_HAR_inches to mm
+#             weather_df['ETo_FAO_mm'] = weather_df['ETo_FAO_inches'] * 25.4
+#             weather_df['ETo_HAR_mm'] = weather_df['ETo_HAR_inches'] * 25.4
 
-            # #get the DataFrame for the average of that day
-            weather_df['YYYY']=weather_df['YYYY'].astype(str)
-            weather_df['MM']=weather_df['MM'].astype(str).str.zfill(2)
-            weather_df['DD']=weather_df['DD'].astype(str).str.zfill(2)
+#             # #get the DataFrame for the average of that day
+#             weather_df['YYYY']=weather_df['YYYY'].astype(str)
+#             weather_df['MM']=weather_df['MM'].astype(str).str.zfill(2)
+#             weather_df['DD']=weather_df['DD'].astype(str).str.zfill(2)
 
-            weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
-            weather_df.Date = pd.to_datetime(weather_df.Date)
+#             weather_df['Date']=weather_df.YYYY+'-'+weather_df.MM+'-'+weather_df.DD
+#             weather_df.Date = pd.to_datetime(weather_df.Date)
 
-            # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
-            numeric_cols = weather_df.select_dtypes(include=['number']).columns
+#             # weather_df = weather_df.drop(columns=['YYYY','MM','DD'], axis=1)
+#             numeric_cols = weather_df.select_dtypes(include=['number']).columns
             
-            if not numeric_cols.empty:
-                w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-            else:
-                print("No numeric columns found for mean calculation.")
-                continue
-            w_df['Date']=dt
+#             if not numeric_cols.empty:
+#                 w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
+#             else:
+#                 print("No numeric columns found for mean calculation.")
+#                 continue
+#             w_df['Date']=dt
 
-            cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
-            w_df = w_df[cols]
-            w_all = pd.concat([w_all, w_df], ignore_index=True)
+#             cols = ['Date','ETo_AVG_IN','ETo_FAO_mm','ETo_HAR_mm']
+#             w_df = w_df[cols]
+#             w_all = pd.concat([w_all, w_df], ignore_index=True)
 
         
-        if len(w_all) > 0:
-            w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
-            w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
+#         if len(w_all) > 0:
+#             w_all['ETo_AVG_IN'] = pd.to_numeric(w_all['ETo_AVG_IN'], errors='coerce')
+#             w_all = w_all.dropna(subset=['ETo_AVG_IN'])  # Drop rows with NaN in ETo_AVG_IN
 
-            if not w_all.empty:
-                # Take the average of the columns
-                w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
-                w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
-                w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
-                w_ret.reset_index(inplace=True)
-            else:
-                w_ret = pd.DataFrame()
-        else:
-            w_ret = pd.DataFrame()
+#             if not w_all.empty:
+#                 # Take the average of the columns
+#                 w_ret = pd.DataFrame(w_all.groupby(["Date"])["ETo_AVG_IN"].mean())
+#                 w_ret['ETo_FAO_mm'] = w_all['ETo_FAO_mm']
+#                 w_ret['ETo_HAR_mm'] = w_all['ETo_HAR_mm']
+#                 w_ret.reset_index(inplace=True)
+#             else:
+#                 w_ret = pd.DataFrame()
+#         else:
+#             w_ret = pd.DataFrame()
 
-    except Exception as e :
-        print(e)
-    end_time = time.time()
-    time_elapsed = (end_time - start_time)
+#     except Exception as e :
+#         print(e)
+#     end_time = time.time()
+#     time_elapsed = (end_time - start_time)
     
-    return w_ret
+#     return w_ret
     
 
 def getEtoFromNOAAForecast(lat, lon, filePath,start_date,end_date):
@@ -28086,7 +28079,6 @@ def extractLatLonFromWKT(wkt_polygon):
         # Extract the latitude and longitude from the centroid
         lat = c.y
         lon = c.x
-        print(lat, lon)
         return lat, lon
     except Exception as e:
         print(f"Error processing WKT with Shapely: {e}")
@@ -28391,158 +28383,235 @@ def interpolateMissingValsEtcWeather(weather_df):
     return new_weather_df
 
 
-def getWeatherForGeoid(df, agstack_geoid):
+# def getWeatherForGeoid(df, agstack_geoid):
+#     # List of required columns to filter
+#     required_columns = [
+#         'ULWRF_surface', 'USWRF_surface', 'DLWRF_surface', 
+#         'DSWRF_surface', 'GUST_surface', 'PRATE_surface',
+#         'TSOIL_0D1M0D4mbelowground', 'TSOIL_0D4M1mbelowground', 
+#         'TSOIL_0M0D1mbelowground', 'TSOIL_1M2mbelowground',
+#         'T_max', 'T_min', 'T_mean','RH_2maboveground', 'DPT_2maboveground','WindRun','Avg_Eto'
+#     ]
+#     df['T_mean'] = df['T_mean'] + 273.15  # Celsius to Kelvin
+#     df['T_max'] = df['T_max'] + 273.15  # Celsius to Kelvin
+#     df['T_min'] = df['T_min'] + 273.15  # Celsius to Kelvin
+#     df['DPT_2maboveground'] = df['DPT_2maboveground'] + 273.15  # Celsius to Kelvin  
+#     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
+#     df['Avg_Eto'] = df['ETo_AVG_IN']
+#     df['WindRun'] = df['AWND'] * 3600
     
+#     # Ensure 'Date' column is a datetime object
+#     if 'Date' in df.columns:
+#         df['Date'] = pd.to_datetime(df['Date'])
+        
+#         # Check for duplicates in the Date column
+#     if df['Date'].duplicated().any():
+#         df = df.groupby('Date').mean(numeric_only =True).reset_index()
+#     # Reindexing only if missing dates exist
+#     full_date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
+#     missing_dates = full_date_range.difference(df['Date'])
+#     if not missing_dates.empty:
+#         df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+#     df = df.interpolate(method='linear')
+#     list_of_dates = df['Date'].tolist()
+#     df = df.interpolate(method='linear')  
+    
+#     idxx = 0
+#     df_weather_for_dates = pd.DataFrame()
+#     for dt in list_of_dates:
+#         df_dt = df[df.Date == dt]
+#         # Fetch the WKT (Well-Known Text) of the geoid for station points
+#         wkt = fetchWKT(agstack_geoid)
+#         polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
+#         coords = list(polygon.exterior.coords)
+#         if coords[0] != coords[-1]:
+#             coords.append(coords[0])  # Close the polygon manually
+#         stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
+#         # Calculate the centroid of the polygon
+#         centroid = polygon.centroid
+#         # Pass the centroid instead of the full list of points
+#         df_dt['StationId'] = create_station_id(stnPoints ,centroid)
+#         stns = pd.unique(df_dt.StationId)
+#         [ids, pts, dis, wts] = getNearestNStnID(centroid, stnPoints, 5)  # Adjust N here
+#         if len(stns) == 0:
+#             # print("No stations found. Skipping this timestamp or handling it appropriately.")
+#             nearestStnIDs = []  # Or handle gracefully
+#         elif max(ids) >= len(stns):
+#             # print(f"Warning: IDs {ids} are out of bounds for stns size {len(stns)}.")
+#             nearestStnIDs = stns[:min(len(stns), len(ids))]  # Adjust indices to fit stns size
+#         else:
+#             nearestStnIDs = stns[ids]
 
+#         # Initialize lists for the data
+#         T_mean = []
+#         ULWRF_surface = []
+#         USWRF_surface = []
+#         DLWRF_surface = []
+#         DSWRF_surface = []
+#         GUST_surface = []
+#         PRATE_surface = []
+#         TSOIL_0D1M0D4mbelowground = []
+#         TSOIL_0D4M1mbelowground = []
+#         TSOIL_0M0D1mbelowground = []
+#         TSOIL_1M2mbelowground = []
+#         T_max = []
+#         T_min = []
+#         RH_2maboveground = []
+#         DPT_2maboveground = []
+#         Avg_Etos = []
+#         WindRuns = []
+        
+#         # Process each station and calculate weighted averages
+#         for stn in nearestStnIDs:
+#             T_mean.append(df_dt[df_dt.StationId == stn]['T_mean'].mean())
+#             ULWRF_surface.append(df_dt[df_dt.StationId == stn]['ULWRF_surface'].mean())
+#             USWRF_surface.append(df_dt[df_dt.StationId == stn]['USWRF_surface'].mean())
+#             DLWRF_surface.append(df_dt[df_dt.StationId == stn]['DLWRF_surface'].mean())
+#             DSWRF_surface.append(df_dt[df_dt.StationId == stn]['DSWRF_surface'].mean())
+#             GUST_surface.append(df_dt[df_dt.StationId == stn]['GUST_surface'].mean())
+#             PRATE_surface.append(df_dt[df_dt.StationId == stn]['PRATE_surface'].mean())
+#             TSOIL_0D1M0D4mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0D1M0D4mbelowground'].mean())
+#             TSOIL_0D4M1mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0D4M1mbelowground'].mean())
+#             TSOIL_0M0D1mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0M0D1mbelowground'].mean())
+#             TSOIL_1M2mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_1M2mbelowground'].mean())
+#             T_max.append(df_dt[df_dt.StationId == stn]['T_max'].mean())
+#             T_min.append(df_dt[df_dt.StationId == stn]['T_min'].mean())
+#             RH_2maboveground.append(df_dt[df_dt.StationId == stn]['RH_2maboveground'].mean())
+#             DPT_2maboveground.append(df_dt[df_dt.StationId == stn]['DPT_2maboveground'].mean())
+#             Avg_Etos.append(df_dt[df_dt.StationId == stn]['Avg_Eto'].mean())
+#             WindRuns.append(df_dt[df_dt.StationId == stn]['WindRun'].mean())
+
+#         wts = np.array(wts)  # Ensure it is a numpy array for easier broadcasting
+#         # Reshaping weights to match the number of stations
+#         wts = wts.reshape(-1, 1)
+#         # Aggregating values using numpy broadcasting
+#         weighted_T_mean = np.nansum(np.array(T_mean) * np.array(wts))
+#         weighted_ULWRF_surface = np.nansum(np.array(ULWRF_surface) * np.array(wts))
+#         weighted_USWRF_surface = np.nansum(np.array(USWRF_surface) * np.array(wts))
+#         weighted_DLWRF_surface = np.nansum(np.array(DLWRF_surface) * np.array(wts))
+#         weighted_DSWRF_surface = np.nansum(np.array(DSWRF_surface) * np.array(wts))
+#         weighted_GUST_surface = np.nansum(np.array(GUST_surface) * np.array(wts))
+#         weighted_PRATE_surface = np.nansum(np.array(PRATE_surface) * np.array(wts))
+#         weighted_TSOIL_0D1M0D4mbelowground = np.nansum(np.array(TSOIL_0D1M0D4mbelowground) * np.array(wts))
+#         weighted_TSOIL_0D4M1mbelowground = np.nansum(np.array(TSOIL_0D4M1mbelowground) * np.array(wts))
+#         weighted_TSOIL_0M0D1mbelowground = np.nansum(np.array(TSOIL_0M0D1mbelowground) * np.array(wts))
+#         weighted_TSOIL_1M2mbelowground = np.nansum(np.array(TSOIL_1M2mbelowground) * np.array(wts))
+#         weighted_T_max = np.nansum(np.array(T_max) * np.array(wts))
+#         weighted_T_min = np.nansum(np.array(T_min) * np.array(wts))
+#         weighted_RH_2maboveground = np.nansum(np.array(RH_2maboveground) * np.array(wts))
+#         weighted_DPT_2maboveground = np.nansum(np.array(DPT_2maboveground) * np.array(wts))
+#         Avg_Eto = np.nansum(np.array(Avg_Etos) * np.array(wts))
+#         WindRun = np.nansum(np.array(WindRuns) * np.array(wts))
+
+#         # Add the weighted averages to the result dataframe
+#         df_weather_for_dates.loc[idxx, 'Date'] = dt
+#         df_weather_for_dates.loc[idxx, 'T_mean'] = weighted_T_mean
+#         df_weather_for_dates.loc[idxx, 'ULWRF_surface'] = weighted_ULWRF_surface
+#         df_weather_for_dates.loc[idxx, 'USWRF_surface'] = weighted_USWRF_surface
+#         df_weather_for_dates.loc[idxx, 'DLWRF_surface'] = weighted_DLWRF_surface
+#         df_weather_for_dates.loc[idxx, 'DSWRF_surface'] = weighted_DSWRF_surface
+#         df_weather_for_dates.loc[idxx, 'GUST_surface'] = weighted_GUST_surface
+#         df_weather_for_dates.loc[idxx, 'PRATE_surface'] = weighted_PRATE_surface
+#         df_weather_for_dates.loc[idxx, 'TSOIL_0D1M0D4mbelowground'] = weighted_TSOIL_0D1M0D4mbelowground
+#         df_weather_for_dates.loc[idxx, 'TSOIL_0D4M1mbelowground'] = weighted_TSOIL_0D4M1mbelowground
+#         df_weather_for_dates.loc[idxx, 'TSOIL_0M0D1mbelowground'] = weighted_TSOIL_0M0D1mbelowground
+#         df_weather_for_dates.loc[idxx, 'TSOIL_1M2mbelowground'] = weighted_TSOIL_1M2mbelowground
+#         df_weather_for_dates.loc[idxx, 'T_max'] = weighted_T_max
+#         df_weather_for_dates.loc[idxx, 'T_min'] = weighted_T_min
+#         df_weather_for_dates.loc[idxx, 'RH_2maboveground'] = weighted_RH_2maboveground
+#         df_weather_for_dates.loc[idxx, 'DPT_2maboveground'] = weighted_DPT_2maboveground
+#         df_weather_for_dates.loc[idxx, 'Avg_Eto'] = Avg_Eto
+#         df_weather_for_dates.loc[idxx, 'WindRun'] = WindRun
+#         idxx += 1
+#     # Compute the average of df_weather_for_dates for each date
+#     df_weather_for_dates_avg = df_weather_for_dates.groupby('Date', as_index=False).mean()
+#     return df_weather_for_dates_avg
+
+
+from concurrent.futures import ThreadPoolExecutor
+
+def getWeatherForGeoid(df, agstack_geoid):
     # List of required columns to filter
     required_columns = [
         'ULWRF_surface', 'USWRF_surface', 'DLWRF_surface', 
         'DSWRF_surface', 'GUST_surface', 'PRATE_surface',
         'TSOIL_0D1M0D4mbelowground', 'TSOIL_0D4M1mbelowground', 
         'TSOIL_0M0D1mbelowground', 'TSOIL_1M2mbelowground',
-        'T_max', 'T_min', 'T_mean','RH_2maboveground', 'DPT_2maboveground'
+        'T_max', 'T_min', 'T_mean', 'RH_2maboveground', 
+        'DPT_2maboveground', 'WindRun', 'Avg_Eto'
     ]
-    
+
+    # Convert temperature columns from Celsius to Kelvin
+    temp_columns = ['T_mean', 'T_max', 'T_min', 'DPT_2maboveground']
+    df[temp_columns] = df[temp_columns] + 273.15
+
+    # Create 'Date' column from 'Year', 'Month', 'Day'
     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
 
+    # Calculate derived columns
+    df['Avg_Eto'] = df['ETo_AVG_IN']
+    df['WindRun'] = df['AWND'] * 3600
+
     # Ensure 'Date' column is a datetime object
-    if 'Date' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date'])
+    df['Date'] = pd.to_datetime(df['Date'])
 
-    # print("Columns in df:", df.columns)
-
-        # Check for duplicates in the Date column
+    # Handle duplicates in the 'Date' column
     if df['Date'].duplicated().any():
-        print("Duplicate dates found in DataFrame. Aggregating...")
-        df = df.groupby('Date').mean(numeric_only =True).reset_index()
+        df = df.groupby('Date').mean(numeric_only=True).reset_index()
 
-
-    # Reindexing only if missing dates exist
+    # Reindex to fill missing dates
     full_date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
-    missing_dates = full_date_range.difference(df['Date'])
-    
-    if not missing_dates.empty:
-        df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
-
-
-
+    df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
     df = df.interpolate(method='linear')
-    list_of_dates = df['Date'].tolist()
-    
-    df = df.interpolate(method='linear')
-    print("Interpolated DataFrame:")   
-    
-    idxx = 0
-    df_weather_for_dates = pd.DataFrame()
-    for dt in list_of_dates:
-        df_dt = df[df.Date == dt]
-        
-        # Fetch the WKT (Well-Known Text) of the geoid for station points
-        wkt = fetchWKT(agstack_geoid)
-        polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
-        coords = list(polygon.exterior.coords)
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])  # Close the polygon manually
-        
-        stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
-        
-        # Calculate the centroid of the polygon
-        centroid = polygon.centroid
 
-        # Pass the centroid instead of the full list of points
-        df_dt['StationId'] = create_station_id(stnPoints ,centroid)
+    # Fetch WKT and create polygon
+    wkt = fetchWKT(agstack_geoid)
+    polygon = loads(wkt)
+    coords = list(polygon.exterior.coords)
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])  # Close the polygon
+    stnPoints = [Point(lon, lat) for lon, lat in coords]
+    centroid = polygon.centroid
 
-        stns = pd.unique(df_dt.StationId)
+    # Create station IDs
+    df['StationId'] = create_station_id(stnPoints, centroid)
 
-        [ids, pts, dis, wts] = getNearestNStnID(centroid, stnPoints, 5)  # Adjust N here
-        if len(stns) == 0:
-            # print("No stations found. Skipping this timestamp or handling it appropriately.")
-            nearestStnIDs = []  # Or handle gracefully
-        elif max(ids) >= len(stns):
-            
-            # print(f"Warning: IDs {ids} are out of bounds for stns size {len(stns)}.")
-            nearestStnIDs = stns[:min(len(stns), len(ids))]  # Adjust indices to fit stns size
-        else:
-            nearestStnIDs = stns[ids]
+    # Get unique station IDs
+    stns = pd.unique(df['StationId'])
 
-        # Initialize lists for the data
-        T_mean = []
-        ULWRF_surface = []
-        USWRF_surface = []
-        DLWRF_surface = []
-        DSWRF_surface = []
-        GUST_surface = []
-        PRATE_surface = []
-        TSOIL_0D1M0D4mbelowground = []
-        TSOIL_0D4M1mbelowground = []
-        TSOIL_0M0D1mbelowground = []
-        TSOIL_1M2mbelowground = []
-        T_max = []
-        T_min = []
-        RH_2maboveground = []
-        DPT_2maboveground = []
-        
+    # Get nearest station IDs and weights
+    [ids, pts, dis, wts] = getNearestNStnID(centroid, stnPoints, 5)
+    wts = np.array(wts).reshape(-1, 1)  # Reshape weights for broadcasting
+
+    # Function to process a single date
+    def process_date(dt):
+        df_dt = df[df['Date'] == dt]
+        nearestStnIDs = stns[ids] if len(stns) > max(ids) else stns[:len(ids)]
+
+        # Initialize lists for weighted averages
+        weighted_values = {col: [] for col in required_columns}
+
         # Process each station and calculate weighted averages
         for stn in nearestStnIDs:
-            T_mean.append(df_dt[df_dt.StationId == stn]['T_mean'].mean())
-            ULWRF_surface.append(df_dt[df_dt.StationId == stn]['ULWRF_surface'].mean())
-            USWRF_surface.append(df_dt[df_dt.StationId == stn]['USWRF_surface'].mean())
-            DLWRF_surface.append(df_dt[df_dt.StationId == stn]['DLWRF_surface'].mean())
-            DSWRF_surface.append(df_dt[df_dt.StationId == stn]['DSWRF_surface'].mean())
-            GUST_surface.append(df_dt[df_dt.StationId == stn]['GUST_surface'].mean())
-            PRATE_surface.append(df_dt[df_dt.StationId == stn]['PRATE_surface'].mean())
-            TSOIL_0D1M0D4mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0D1M0D4mbelowground'].mean())
-            TSOIL_0D4M1mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0D4M1mbelowground'].mean())
-            TSOIL_0M0D1mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_0M0D1mbelowground'].mean())
-            TSOIL_1M2mbelowground.append(df_dt[df_dt.StationId == stn]['TSOIL_1M2mbelowground'].mean())
-            T_max.append(df_dt[df_dt.StationId == stn]['T_max'].mean())
-            T_min.append(df_dt[df_dt.StationId == stn]['T_min'].mean())
-            RH_2maboveground.append(df_dt[df_dt.StationId == stn]['RH_2maboveground'].mean())
-            DPT_2maboveground.append(df_dt[df_dt.StationId == stn]['DPT_2maboveground'].mean())
+            df_stn = df_dt[df_dt['StationId'] == stn]
+            for col in required_columns:
+                weighted_values[col].append(df_stn[col].mean())
 
-        wts = np.array(wts)  # Ensure it is a numpy array for easier broadcasting
+        # Calculate weighted averages
+        result = {'Date': dt}
+        for col in required_columns:
+            result[col] = np.nansum(np.array(weighted_values[col]) * wts)
 
-        # Reshaping weights to match the number of stations
-        wts = wts.reshape(-1, 1)
+        return result
 
-        # Aggregating values using numpy broadcasting
-        weighted_T_mean = np.nansum(np.array(T_mean) * np.array(wts))
-        weighted_ULWRF_surface = np.nansum(np.array(ULWRF_surface) * np.array(wts))
-        weighted_USWRF_surface = np.nansum(np.array(USWRF_surface) * np.array(wts))
-        weighted_DLWRF_surface = np.nansum(np.array(DLWRF_surface) * np.array(wts))
-        weighted_DSWRF_surface = np.nansum(np.array(DSWRF_surface) * np.array(wts))
-        weighted_GUST_surface = np.nansum(np.array(GUST_surface) * np.array(wts))
-        weighted_PRATE_surface = np.nansum(np.array(PRATE_surface) * np.array(wts))
-        weighted_TSOIL_0D1M0D4mbelowground = np.nansum(np.array(TSOIL_0D1M0D4mbelowground) * np.array(wts))
-        weighted_TSOIL_0D4M1mbelowground = np.nansum(np.array(TSOIL_0D4M1mbelowground) * np.array(wts))
-        weighted_TSOIL_0M0D1mbelowground = np.nansum(np.array(TSOIL_0M0D1mbelowground) * np.array(wts))
-        weighted_TSOIL_1M2mbelowground = np.nansum(np.array(TSOIL_1M2mbelowground) * np.array(wts))
-        weighted_T_max = np.nansum(np.array(T_max) * np.array(wts))
-        weighted_T_min = np.nansum(np.array(T_min) * np.array(wts))
-        weighted_RH_2maboveground = np.nansum(np.array(RH_2maboveground) * np.array(wts))
-        weighted_DPT_2maboveground = np.nansum(np.array(DPT_2maboveground) * np.array(wts))
+    # Process all dates in parallel
+    with ThreadPoolExecutor() as executor:
+        results = list(executor.map(process_date, df['Date'].unique()))
 
-        # Add the weighted averages to the result dataframe
-        df_weather_for_dates.loc[idxx, 'Date'] = dt
-        df_weather_for_dates.loc[idxx, 'T_mean'] = weighted_T_mean
-        df_weather_for_dates.loc[idxx, 'ULWRF_surface'] = weighted_ULWRF_surface
-        df_weather_for_dates.loc[idxx, 'USWRF_surface'] = weighted_USWRF_surface
-        df_weather_for_dates.loc[idxx, 'DLWRF_surface'] = weighted_DLWRF_surface
-        df_weather_for_dates.loc[idxx, 'DSWRF_surface'] = weighted_DSWRF_surface
-        df_weather_for_dates.loc[idxx, 'GUST_surface'] = weighted_GUST_surface
-        df_weather_for_dates.loc[idxx, 'PRATE_surface'] = weighted_PRATE_surface
-        df_weather_for_dates.loc[idxx, 'TSOIL_0D1M0D4mbelowground'] = weighted_TSOIL_0D1M0D4mbelowground
-        df_weather_for_dates.loc[idxx, 'TSOIL_0D4M1mbelowground'] = weighted_TSOIL_0D4M1mbelowground
-        df_weather_for_dates.loc[idxx, 'TSOIL_0M0D1mbelowground'] = weighted_TSOIL_0M0D1mbelowground
-        df_weather_for_dates.loc[idxx, 'TSOIL_1M2mbelowground'] = weighted_TSOIL_1M2mbelowground
-        df_weather_for_dates.loc[idxx, 'T_max'] = weighted_T_max
-        df_weather_for_dates.loc[idxx, 'T_min'] = weighted_T_min
-        df_weather_for_dates.loc[idxx, 'RH_2maboveground'] = weighted_RH_2maboveground
-        df_weather_for_dates.loc[idxx, 'DPT_2maboveground'] = weighted_DPT_2maboveground
-        idxx += 1
+    # Create DataFrame from results
+    df_weather_for_dates = pd.DataFrame(results)
 
-    # Compute the average of df_weather_for_dates for each date
+    # Compute the average for each date (if needed)
     df_weather_for_dates_avg = df_weather_for_dates.groupby('Date', as_index=False).mean()
 
     return df_weather_for_dates_avg
-
