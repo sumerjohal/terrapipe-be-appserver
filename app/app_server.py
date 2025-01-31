@@ -3431,9 +3431,6 @@ def fetchNCEPWeatherForecast(start_date, end_date, agstack_geoid):
 
     return weather_df
 
-
-
-# @memoize_noaa
 def getWeatherFromNOAA(agstack_geoid, start_date, end_date):
     # filePath = '/home/rajat/Downloads/rnaura_work/mnt/md0/NOAA/PARQUET_S2/'
     filePath = '/network/NOAA/PARQUET_S2/'
@@ -3907,6 +3904,8 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
             w_ret['vis_km'] = w_all['vis_km']
             w_ret['weather'] = w_all['weather']
             w_ret['wind_dir'] = w_all['wind_dir']
+            w_ret['wind_dir'] = w_all['wind_dir']
+            w_ret['U_z'] = w_all['U_z']
             
             
             
@@ -5077,26 +5076,38 @@ def weatherMetadata_desc():
 #     return result
 
 from concurrent.futures import ThreadPoolExecutor
-
 def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dict:
     # Set end_date to today if not provided
     end_date = datetime.now().strftime('%Y-%m-%d') if end_date is None else end_date
 
     # List of functions to retrieve weather data
     weather_functions = [
-        getWeatherFromNCEP,
-        getWeatherFromAUS,
-        getWeatherFromNOAA,
-        getWeatherFromGHCND,
-        getWeatherFromNLDAS
+        lambda geoid, start_date, end_date=end_date: getWeatherFromNCEP(geoid, start_date, end_date),
+        lambda geoid, start_date, end_date=end_date: getWeatherFromAUS(geoid, start_date, end_date),
+        lambda geoid, start_date, end_date=end_date: getWeatherFromNOAA(geoid, start_date, end_date),
+        lambda geoid, start_date, end_date=end_date: getWeatherFromGHCND(geoid, start_date, end_date),
+        lambda geoid, start_date, end_date=end_date: getWeatherFromNLDAS(geoid, start_date, end_date),
+        lambda geoid, start_date, end_date=end_date: getWeatherFromCIMIS(geoid, start_date, end_date)
     ]
 
-    # Use ThreadPoolExecutor to parallelize API calls
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(func, geoid, start_date, end_date) for func in weather_functions]
-        dataframes = [future.result() for future in futures]
+    # Source names corresponding to the functions
+    source_names = ['NCEP', 'AUS', 'NOAA', 'GHCND', 'NLDAS', 'CIMIS']
 
-    # Concatenate all DataFrames
+    # Parallel execution with source tracking
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(func, geoid, start_date, end_date): name
+            for func, name in zip(weather_functions, source_names)
+        }
+        dataframes = []
+        for future in futures:
+            df = future.result()
+            df['source'] = futures[future]  # Add source column
+            # Process each dataframe individually before merging
+            processed_df = getWeatherForGeoid(df, geoid)
+            dataframes.append(processed_df)
+
+    # Concatenate all processed DataFrames
     merged_df = pd.concat(dataframes, ignore_index=True)
 
     # Flatten dictionary-like columns
@@ -5108,22 +5119,19 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
     # Perform additional cleaning
     merged_df = merged_df.drop_duplicates().fillna(method='ffill')
 
-    # Get weather data for geoid
-    f_df = getWeatherForGeoid(merged_df, geoid)
-
     # Rename 'Date' to 'date' if present
-    if 'Date' in f_df.columns:
-        f_df.rename(columns={'Date': 'date'}, inplace=True)
+    if 'Date' in merged_df.columns:
+        merged_df.rename(columns={'Date': 'date'}, inplace=True)
 
     # Ensure 'date' is a datetime object
-    f_df['date'] = pd.to_datetime(f_df['date'])
+    merged_df['date'] = pd.to_datetime(merged_df['date'])
 
     # Extract time component and create an hour column
-    f_df['hour'] = f_df['date'].dt.hour
+    merged_df['hour'] = merged_df['date'].dt.hour
 
     # Group by date and hour
     result = {}
-    for (date, hour), group in f_df.groupby([f_df['date'].dt.date, 'hour']):
+    for (date, hour), group in merged_df.groupby([merged_df['date'].dt.date, 'hour']):
         date_str = str(date)
         if date_str not in result:
             result[date_str] = []
@@ -5131,6 +5139,69 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
         result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
 
     return result
+
+
+# def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dict:
+#     # Set end_date to today if not provided
+#     end_date = datetime.now().strftime('%Y-%m-%d') if end_date is None else end_date
+
+#     # List of functions to retrieve weather data
+#     weather_functions = [
+#         getWeatherFromNCEP,
+#         getWeatherFromAUS,
+#         getWeatherFromNOAA,
+#         getWeatherFromGHCND,
+#         getWeatherFromNLDAS,
+#         getWeatherFromCIMIS
+#     ]
+
+#     # Modified parallel execution with source tracking
+#     source_names = ['NCEP', 'AUS', 'NOAA', 'GHCND', 'NLDAS','CIMIS']  # Match order of weather_functions
+#     with ThreadPoolExecutor() as executor:
+#         futures = {executor.submit(func, geoid, start_date, end_date): name 
+#                   for func, name in zip(weather_functions, source_names)}
+#         dataframes = []
+#         for future in futures:
+#             df = future.result()
+#             df['source'] = futures[future]  # Add source column
+#             dataframes.append(df)
+
+#     # Concatenate all DataFrames
+#     merged_df = pd.concat(dataframes, ignore_index=True)
+
+#     # Flatten dictionary-like columns
+#     for column in merged_df.columns:
+#         if isinstance(merged_df[column].iloc[0], dict):
+#             flattened = merged_df[column].apply(pd.Series)
+#             merged_df = pd.concat([merged_df, flattened], axis=1).drop(columns=[column])
+
+#     # Perform additional cleaning
+#     merged_df = merged_df.drop_duplicates().fillna(method='ffill')
+
+#     # Get weather data for geoid
+#     f_df = getWeatherForGeoid(merged_df, geoid)
+
+#     # Rename 'Date' to 'date' if present
+#     if 'Date' in f_df.columns:
+#         f_df.rename(columns={'Date': 'date'}, inplace=True)
+
+#     # Ensure 'date' is a datetime object
+#     f_df['date'] = pd.to_datetime(f_df['date'])
+
+#     # Extract time component and create an hour column
+#     f_df['hour'] = f_df['date'].dt.hour
+
+#     # Group by date and hour
+#     result = {}
+#     for (date, hour), group in f_df.groupby([f_df['date'].dt.date, 'hour']):
+#         date_str = str(date)
+#         if date_str not in result:
+#             result[date_str] = []
+#         # Add hourly data as a dictionary
+#         result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
+
+#     return result
+
 
 # def reload_gunicorn_workers():
 #     print("Reloading Gunicorn workers...")
@@ -5718,9 +5789,7 @@ def getNOAAFORECASTEDWeatherData():
 
     
     # Convert DataFrame to a dictionary
-    json_data = weather_df.to_dict(orient='records')
-
-
+    json_data = weather_df.to_dict(orient='records')    
     response = {
         "data": json_data,
         "metadata": get_noaa_forecast_metadata(),
@@ -6067,7 +6136,6 @@ def getNDVIImgEtc():
     N = request.args.get('N')
     
     N = int(N)  # ensure it's converted to an integer
-
     
     # Assuming `getNDVIgdfFromGeoidEtc` is the updated function
     final_res_gdf, bound_gdf = getNDVIgdfFromGeoidEtc(agstack_geoid, date, N)
@@ -6209,23 +6277,10 @@ def getWeatherfunc():
 
 #     return matchDict
 
-# Directory watching and hot-reloading setup
-base_path_nldas_reload = '/mnt/md1/NLDAS/PARQUET_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/'
-base_path_ncep_reload = '/mnt/md1/NCEP/PARQUET_S2/s2_tokens_L5/s2_tokens_L7/s2_tokens_L9/Year=2024/'
-extra_dirs = [base_path_nldas_reload, base_path_ncep_reload]
-extra_files = extra_dirs[:]
-
-for extra_dir in extra_dirs:
-    for dirname, dirs, files in walk(extra_dir):
-        for filename in files:
-            file_path = path.join(dirname, filename)
-            if path.isfile(file_path):
-                extra_files.append(file_path)
-
 if __name__ == '__main__':
     # extra_files = [updated_data_available_file,]
 
-    app.run(debug=True,extra_files=extra_files,port=5000)
+    app.run(debug=True,port=5000)
 
 
 

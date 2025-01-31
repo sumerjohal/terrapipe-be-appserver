@@ -1669,40 +1669,78 @@ def Convert(s):
     li = list(eval(s))
     return li
 
-def getNearestNStnIDsInOrder2(c,stnPoints,N):
-    #returns the indexes, 
-    #the sorted list of stns, 
-    #the distances and 
-    #the weights (w=1/dis)
+# def getNearestNStnIDsInOrder2(c,stnPoints,N):
+#     #returns the indexes, 
+#     #the sorted list of stns, 
+#     #the distances and 
+#     #the weights (w=1/dis)
     
     
+#     dist = []
+#     #stnPts = MultiPoint(stnPoints)
+#     #nearest_geoms = nearest_points(point, stnPoints) #ordered list of shapely points
+#     for p in stnPoints:
+#         d = float(c.distance(p))
+#         print(f"Distance to {p}: {d}")
+#         if d==0:
+#             d = 0.000001
+#         else:
+#             dist.append(d)
+    
+#     idx = np.array([i[0] for i in sorted(enumerate(dist), key=lambda x:x[1])])
+
+#     orderedStns = [stnPoints[i] for i in idx]
+    
+#     orderedDist = [dist[i] for i in idx]
+    
+#     M = min(N, len(stnPoints))
+
+#     orderedWghts=[]
+#     invDist = []
+#     for d in orderedDist[0:M]:
+#         invDist.append(1/d)
+#     den = sum(invDist)   
+#     for w in invDist:
+#         orderedWghts.append(w/den)
+    
+#     return [idx[0:M],orderedStns[0:M],orderedDist[0:M],orderedWghts]
+
+def getNearestNStnIDsInOrder2(c, stnPoints, N):
     dist = []
-    #stnPts = MultiPoint(stnPoints)
-    #nearest_geoms = nearest_points(point, stnPoints) #ordered list of shapely points
     for p in stnPoints:
         d = float(c.distance(p))
-        if d==0:
-            d=0.000001
-        else:
-            dist.append(d)
+        if d == 0:
+            d = 0.000001  # Avoid zero distance
+        dist.append(d)
+
+    # Debugging: Print out the distances
+    print(f"Distances: {dist}")
     
+    # Sort the distances and get the corresponding indices
     idx = np.array([i[0] for i in sorted(enumerate(dist), key=lambda x:x[1])])
 
-    orderedStns = [stnPoints[i] for i in idx]
+    # Debugging: Print sorted indices
+    print(f"Sorted Indices: {idx}")
     
-    orderedDist = [dist[i] for i in idx]
-    
+    # Ensure that we return only N nearest stations, or all if less than N
     M = min(N, len(stnPoints))
-
-    orderedWghts=[]
-    invDist = []
-    for d in orderedDist[0:M]:
-        invDist.append(1/d)
-    den = sum(invDist)   
-    for w in invDist:
-        orderedWghts.append(w/den)
     
-    return [idx[0:M],orderedStns[0:M],orderedDist[0:M],orderedWghts]
+    # Debugging: Print number of stations selected
+    print(f"Number of stations selected: {M}")
+
+    orderedStns = [stnPoints[i] for i in idx[:M]]
+    orderedDist = [dist[i] for i in idx[:M]]
+    
+    invDist = [1/d for d in orderedDist if d != 0]
+    den = sum(invDist)
+    orderedWghts = [w/den for w in invDist]
+    
+    # Debugging: Print the ordered stations and weights
+    print(f"Ordered Stations: {orderedStns}")
+    print(f"Weights: {orderedWghts}")
+    
+    return idx[:M], orderedStns, orderedDist, orderedWghts
+
 
 def getTileStr(tileListStr):
     tilestr = tileListStr.strip(']["')
@@ -28528,90 +28566,195 @@ def interpolateMissingValsEtcWeather(weather_df):
 #     return df_weather_for_dates_avg
 
 
+#load shapefiles for the region boundaries:
+shFileDir = '/home/user/terrapipe/shapefiles/'
+worldShpFile = shFileDir + 'WB_countries_Admin0_10m/WB_countries_Admin0_10m.shp'
+world_gdf = gpd.read_file(worldShpFile)
+world_gdf = world_gdf.set_crs(4326)
+
+#AUS
+aus_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('Australia', case=False, na=False)].reset_index()
+
+# United States of America
+usa_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('United States of America', case=False, na=False)].reset_index()
+
+def getRegion(geoid):
+    #get the polygon and its centroid
+    if (aus_gdf.contains(getCentroidforGeoid(geoid))[0]):
+        return 'AUS'
+    if (usa_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within the US
+        if (ca_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within CA
+            return 'USA-CA'
+        else:
+            return 'USA-!CA'
+    else:
+        return 'OTHER'
+    
+def getCentroidforGeoid(geoid):
+    asset_registry_base = "https://api-ar.agstack.org"
+    res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
+    field_wkt = res['WKT']
+    p = shapely.wkt.loads(field_wkt)
+    c = p.centroid
+    return c
+
 from concurrent.futures import ThreadPoolExecutor
 
+# REGION_CONFIG with predefined region weights
+REGION_CONFIG = {
+    'USA-CA': {
+        'sources': ['CIMIS', 'NOAA', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.6, 0.2, 0.1, 0.05, 0.05],
+        'max_stations': 5
+    },
+    'USA-!CA': {
+        'sources': ['NOAA', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.7, 0.1, 0.1, 0.1],
+        'max_stations': 5
+    },
+    'AUS': {
+        'sources': ['AUS', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.7, 0.1, 0.1, 0.1],
+        'max_stations': 5
+    },
+    'OTHER': {
+        'sources': ['NCEP', 'NLDAS'],  # Default global sources
+        'weights': [0.5, 0.5],
+        'max_stations': 3
+    }
+}
+
+def getRNet(rad_df):
+    """
+    Must have the following columns and units:
+    expected_units: {
+        "ULWRF_surface": "W/m^2",
+        "USWRF_surface": "W/m^2",
+        "DLWRF_surface": "W/m^2",
+        "DSWRF_surface": "W/m^2",
+    }
+    Map them to:
+    LW_U: float,
+    SW_U: float,
+    LW_D: float,
+    SW_D: float,
+    
+    return in W/m^2
+    """
+    rad_df = rad_df.rename(columns={
+        "ULWRF_surface": "LW_U",
+        "USWRF_surface": "SW_U",
+        "DLWRF_surface": "LW_D",
+})
+    SW_D_df = rad_df.loc[:,'SW_D']
+    SW_U_df = rad_df.loc[:,'SW_U']
+    LW_D_df = rad_df.loc[:,'LW_D']
+    LW_U_df = rad_df.loc[:,'LW_U']
+    
+    rad_df['RNet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
+    return pd.DataFrame(rad_df.loc[:,'RNet'])
+
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+from concurrent.futures import ThreadPoolExecutor
+
+
 def getWeatherForGeoid(df, agstack_geoid):
-    # List of required columns to filter
-    required_columns = [
-        'ULWRF_surface', 'USWRF_surface', 'DLWRF_surface', 
-        'DSWRF_surface', 'GUST_surface', 'PRATE_surface',
-        'TSOIL_0D1M0D4mbelowground', 'TSOIL_0D4M1mbelowground', 
-        'TSOIL_0M0D1mbelowground', 'TSOIL_1M2mbelowground',
-        'T_max', 'T_min', 'T_mean', 'RH_2maboveground', 
-        'DPT_2maboveground', 'WindRun', 'Avg_Eto'
-    ]
+    # Get region-specific config
+    region = getRegion(agstack_geoid)
+    print(f'region--{region}')
+    region_config = REGION_CONFIG.get(region, REGION_CONFIG['OTHER'])
+    sources = region_config['sources']
+    region_weights = region_config['weights']
+    max_stations = region_config['max_stations']
 
-    # Convert temperature columns from Celsius to Kelvin
-    temp_columns = ['T_mean', 'T_max', 'T_min', 'DPT_2maboveground']
-    df[temp_columns] = df[temp_columns] + 273.15
+    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']
+    temp_columns = ['T_mean']
 
-    # Create 'Date' column from 'Year', 'Month', 'Day'
+    # Convert temperature to Kelvin
+    df[temp_columns] += 273.15
+
+    # Data preparation for specific sources
+    if df.source.any() == 'AUS':
+        print(f'souce--{df.source}')
+        print(df.columns)
+        df['Avg_Eto'] = df['ETo_AVG_IN']
+        df['WindRun'] = df['U_z']
+    elif region == 'USA-CA':
+        df['Avg_Eto'] = df['ETo_AVG_IN']
+        df['WindRun'] = df['U_z']
+    elif region == 'USA-!CA':
+        df['Avg_Eto'] = df['ETo_AVG_IN']
+        df['WindRun'] = df['U_z']
+    else :
+        df['Avg_Eto'] = np.nan
+        df['WindRun'] = np.nan
+
+        
+    if df['source'].any() == 'NCEP':
+        df['R_net'] = getRNet(df)
+        df['T_mean'] = df['T_mean']
+
+    # Create 'Date' column from year, month, day
     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
-
-    # Calculate derived columns
-    df['Avg_Eto'] = df['ETo_AVG_IN']
-    df['WindRun'] = df['AWND'] * 3600
-
-    # Ensure 'Date' column is a datetime object
-    df['Date'] = pd.to_datetime(df['Date'])
-
-    # Handle duplicates in the 'Date' column
+    
+    # Remove duplicates by averaging numeric columns
     if df['Date'].duplicated().any():
         df = df.groupby('Date').mean(numeric_only=True).reset_index()
 
-    # Reindex to fill missing dates
+    # Reindex for missing dates and interpolate
     full_date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
     df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
     df = df.interpolate(method='linear')
 
-    # Fetch WKT and create polygon
-    wkt = fetchWKT(agstack_geoid)
-    polygon = loads(wkt)
-    coords = list(polygon.exterior.coords)
-    if coords[0] != coords[-1]:
-        coords.append(coords[0])  # Close the polygon
-    stnPoints = [Point(lon, lat) for lon, lat in coords]
-    centroid = polygon.centroid
-
-    # Create station IDs
-    df['StationId'] = create_station_id(stnPoints, centroid)
-
-    # Get unique station IDs
-    stns = pd.unique(df['StationId'])
-
-    # Get nearest station IDs and weights
-    [ids, pts, dis, wts] = getNearestNStnID(centroid, stnPoints, 5)
-    wts = np.array(wts).reshape(-1, 1)  # Reshape weights for broadcasting
-
-    # Function to process a single date
+    # Helper function to process a single date
     def process_date(dt):
         df_dt = df[df['Date'] == dt]
+
+        if 'longitude' not in df_dt.columns or 'latitude' not in df_dt.columns:
+            print("Missing 'longitude' or 'latitude'. Falling back to 'lat' and 'lon'.")
+            geometry = [Point(xy) for xy in zip(df_dt.get('lat', []), df_dt.get('lon', []))]
+        else:
+            geometry = [Point(xy) for xy in zip(df_dt['latitude'], df_dt['longitude'])]
+
+        gdf = gpd.GeoDataFrame(df_dt, geometry=geometry)
+        centroid = gdf.geometry.unary_union.centroid
+
+        # Calculate nearest stations
+        stnPoints = list(pd.unique(gdf.geometry))
+        ids, pts, dis, wts = getNearestNStnID(centroid, stnPoints, 5)
+        df_dt['StationId'] = create_station_id(stnPoints, centroid)
+        stns = pd.unique(df['StationId'])
         nearestStnIDs = stns[ids] if len(stns) > max(ids) else stns[:len(ids)]
 
-        # Initialize lists for weighted averages
-        weighted_values = {col: [] for col in required_columns}
-
-        # Process each station and calculate weighted averages
-        for stn in nearestStnIDs:
-            df_stn = df_dt[df_dt['StationId'] == stn]
-            for col in required_columns:
-                weighted_values[col].append(df_stn[col].mean())
-
         # Calculate weighted averages
-        result = {'Date': dt}
-        for col in required_columns:
-            result[col] = np.nansum(np.array(weighted_values[col]) * wts)
+        weighted_avg = {col: 0 for col in required_columns}
+        for i, stn_id in enumerate(nearestStnIDs):
+            # Get unique station IDs
 
-        return result
+            df_stn = df_dt[df_dt['StationId'] == stn_id]
+            for col in required_columns:
+                value = df_stn[col].mean() if not df_stn[col].isna().all() else np.nan
+                weighted_avg[col] += value * wts[i]
+
+        # Adjust using region weights
+        for i, source in enumerate(sources):
+            source_weight = region_weights[i] if i < len(region_weights) else 0
+            for col in required_columns:
+                weighted_avg[col] += weighted_avg[col] * source_weight
+
+        weighted_avg['Date'] = dt
+        return weighted_avg
 
     # Process all dates in parallel
+    unique_dates = df['Date'].unique()
     with ThreadPoolExecutor() as executor:
-        results = list(executor.map(process_date, df['Date'].unique()))
+        results = list(executor.map(process_date, unique_dates))
 
-    # Create DataFrame from results
+    # Combine results into a DataFrame
     df_weather_for_dates = pd.DataFrame(results)
+    return df_weather_for_dates
 
-    # Compute the average for each date (if needed)
-    df_weather_for_dates_avg = df_weather_for_dates.groupby('Date', as_index=False).mean()
 
-    return df_weather_for_dates_avg
