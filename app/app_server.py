@@ -3789,9 +3789,8 @@ def getWeatherFromGHCND(agstack_geoid, start_date,end_date):
 
 # AUS
 def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
-    # filePath = '/mnt/md1/NLDAS/PARQUETE_S2/'
-    # filePath = '/home/rajat/Downloads/Rnaura_Work/mnt/md1/AUS/DAILY/PROCESSED/PARQUET_S2_TEST/'
-    filePath = "/network/AUS/DAILY/PARQUET_S2/"
+    
+    filePath = "/network/AUS/DAILY/PARQUET_S2_2/"
 
     tok = dtStr.split('-')
     YYYY_str = tok[0]
@@ -3811,130 +3810,119 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
         end_local_dt = datetime(end_YYYY_str, end_MM_str, end_DD_str)
         utc_end_dt = pytz.utc.localize(end_local_dt)
 
-    try:
-        
 
-        s1_time_start = time.time()
-        # Fetch WKT polygon and extract latitude and longitude
-        wkt_polygon = fetchWKT(agstack_geoid)
-        lat, lon = extractLatLonFromWKT(wkt_polygon)
-        start_time = time.time()
-        # Get the list of S2 indices and CIDs for the data point
-        s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-        # print(f'token---{s2_index__L5_list}')
-        
-        list_of_5_paths = [filePath + 's2_token_L5=' + x for x in s2_index__L5_list
-                        if os.path.exists(filePath + 's2_token_L5=' + x)]
-        if not list_of_5_paths:
-            return empty_response()
-        
-        weather_datasets = []
-        for x in list_of_5_paths:
-            weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
+    s1_time_start = time.time()
+    # Fetch WKT polygon and extract latitude and longitude
+    wkt_polygon = fetchWKT(agstack_geoid)
+    lat, lon = extractLatLonFromWKT(wkt_polygon)
+    start_time = time.time()
+    list_of_5_paths = []
+    list_of_9_paths = []
+    # Get the list of S2 indices and CIDs for the data point
+    # Get the list of S2 indices and CIDs for different levels
+    s2_L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
+    # s2_L7_list, L7_cids = get_s2_cellids_and_token_list(7, [lat], [lon])
+    # s2_L9_list, L9_cids = get_s2_cellids_and_token_list(9, [lat], [lon])
+    # print(s2_L5_list)
+    # print(s2_L7_list)
+    # print(s2_L5_list)
+    
+    # Generate valid L5 paths
+    list_of_5_paths = [
+        os.path.join(filePath, f's2_token_L5={x}')
+        for x in s2_L5_list
+        if os.path.exists(os.path.join(filePath, f's2_token_L5={x}'))
+    ]
 
-        w_all = pd.DataFrame()
-        w_ret = pd.DataFrame()
-        for weatherDataset in weather_datasets:
-            if end_date is not None:
-                # Create integer representations for the start and end dates
-                start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
-                end_date_int = end_YYYY_str * 10000 + end_MM_str * 100 + end_DD_str
+    # Generate valid L7 paths (inside L5 paths)
+    # list_of_7_paths = [
+    #     os.path.join(L5_path, f's2_token_L7={x}')
+    #     for L5_path in list_of_5_paths
+    #     for x in s2_L7_list
+    #     if os.path.exists(os.path.join(L5_path, f's2_token_L7={x}'))
+    # ]
 
-                # Filter between start and end date
-                weather_df = weatherDataset.to_table(
-                    filter=(
-                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) >= start_date_int
-                    ) & (
-                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) <= end_date_int
-                    )
-                ).to_pandas()
-            else:
-                # Create integer representation for the start date
-                start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
+    # # Generate valid L9 paths (inside L7 paths)
+    # list_of_9_paths = [
+    #     os.path.join(L7_path, f's2_token_L9={x}')
+    #     for L7_path in list_of_7_paths
+    #     for x in s2_L9_list
+    #     if os.path.exists(os.path.join(L7_path, f's2_token_L9={x}'))
+    # ]
+    # print(list_of_9_paths)
+    
+    if not list_of_5_paths:
+        return empty_response()
+    
+    weather_datasets = []
+    for x in list_of_5_paths:
+        weather_datasets.append(ds.dataset(x, format="parquet", partitioning="hive"))
 
-                # Filter for start date only
-                weather_df = weatherDataset.to_table(
-                    filter=(
-                        (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) == start_date_int
-                    )
-                ).to_pandas()
+    w_all = pd.DataFrame()
+    w_ret = pd.DataFrame()
+    for weatherDataset in weather_datasets:
+        if end_date is not None:
+            # Create integer representations for the start and end dates
+            start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
+            end_date_int = end_YYYY_str * 10000 + end_MM_str * 100 + end_DD_str
+
+            # Filter between start and end date
+            aus_weather_df = weatherDataset.to_table(
+                filter=(
+                    (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) >= start_date_int
+                ) & (
+                    (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) <= end_date_int
+                )
+            ).to_pandas()
+        else:
+            # Create integer representation for the start date
+            start_date_int = int(YYYY_str) * 10000 + int(MM_str) * 100 + int(DD_str)
+
+            # Filter for start date only
+            aus_weather_df = weatherDataset.to_table(
+                filter=(
+                    (ds.field('Year') * 10000 + ds.field('Month') * 100 + ds.field('Day')) == start_date_int
+                )
+            ).to_pandas()
 
 
-            # if not weather_df.empty:
-            #     weather_df.dropna(inplace=True)
-            print(weather_df.columns)
-            w_all = pd.concat([w_all, weather_df], ignore_index=True)
-        if len(w_all) > 0:
-            w_all = w_all.fillna(0)
-            # Convert 'time' column to datetime format if it isn't already
-            # After constructing w_all DataFrame and filling Year, Month, and Day
-            if 'Year' in w_all.columns and 'Month' in w_all.columns and 'Day' in w_all.columns:
-                # Create 'aifstime_utc' based on Year, Month, and Day
-                w_all['aifstime_utc'] = pd.to_datetime(
-                    w_all[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
-                ).dt.tz_localize('UTC')
+        # if not weather_df.empty:
+        #     weather_df.dropna(inplace=True)
+        print(aus_weather_df.columns)
+        w_all = pd.concat([w_all, aus_weather_df], ignore_index=True)
+    if len(w_all) > 0:
+        w_all = w_all.fillna(0)
+        # Convert 'time' column to datetime format if it isn't already
+        # After constructing w_all DataFrame and filling Year, Month, and Day
+        if 'Year' in w_all.columns and 'Month' in w_all.columns and 'Day' in w_all.columns:
+            # Create 'aifstime_utc' based on Year, Month, and Day
+            w_all['aifstime_utc'] = pd.to_datetime(
+                w_all[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)
+            ).dt.tz_localize('UTC')
 
-            # Now you can convert the 'aifstime_utc' column
-            w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
-            # print("======w_all=====",w_all)
-            # Ensure all numeric columns are converted to numeric type
-            numeric_cols = w_all.select_dtypes(include=[np.number]).columns
-            w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
-            # print("Columns in w_all before aggregation:", w_all.columns)
-
-            # Group by 'time' and calculate the mean for each group
-            w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
-            
-            # print("Non-numeric columns:", w_all.select_dtypes(exclude=[np.number]).columns)
-
-            # print("=======w_ret========",w_ret)
-            # Ensure 'Year', 'Month', and 'Day' are included in the response
-            w_ret['Year'] = w_ret['Year'].astype(int)
-            w_ret['Month'] = w_ret['Month'].astype(int)
-            w_ret['Day'] = w_ret['Day'].astype(int)
-            w_ret['cloud'] = w_all['cloud']
-            w_ret['cloud_type'] = w_all['cloud_type']
-            w_ret['name'] = w_all['name']
-            w_ret['press_tend'] = w_all['press_tend']
-            # w_ret['rain_trace'] = w_all['rain_trace']
-            w_ret['local_date_time'] = w_all['local_date_time']
-            w_ret['local_date_time_full'] = w_all['local_date_time_full']
-            w_ret['history_product'] = w_all['history_product']
-            w_ret['local_date_time_full'] = w_all['local_date_time_full']
-            w_ret['vis_km'] = w_all['vis_km']
-            w_ret['weather'] = w_all['weather']
-            w_ret['wind_dir'] = w_all['wind_dir']
-            w_ret['wind_dir'] = w_all['wind_dir']
-            w_ret['U_z'] = w_all['U_z']
-            
-            
-            
-            # print(f'w_ret--{w_ret.columns}')
-            
-            # Ensure TS column is created
-            # if not weather_df.empty:
-            #     weather_df['aifstime_utc'] = pd.to_datetime(weather_df[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1)).dt.tz_localize('UTC')
-
-            #     numeric_cols = weather_df.select_dtypes(include=[np.number]).columns
-            #     w_df = pd.DataFrame(weather_df[numeric_cols].mean(axis=0)).T
-
-            #     # Retain the first TS value or handle TS appropriately
-            #     if 'aifstime_utc' in weather_df.columns and not weather_df['aifstime_utc'].empty:
-            #         w_df['aifstime_utc'] = weather_df['aifstime_utc'].iloc[0]
-            #     else:
-            #         w_df['aifstime_utc'] = pd.NaT  # or some other default value
-
-            #     w_all = pd.concat([w_all, w_df], ignore_index=True)
-
-        # if not w_all.empty:
-        #     w_all = w_all.fillna(0)
-        #     # Take the average of the columns
-        #     w_ret = pd.DataFrame(w_all.groupby(['aifstime_utc']).mean())
-        #     w_ret.reset_index(inplace=True)
-        # else:
-        #     w_ret = pd.DataFrame()
-    except Exception as e:
-        print(e)      
+        # Now you can convert the 'aifstime_utc' column
+        w_all['aifstime_utc'] = pd.to_datetime(w_all['aifstime_utc'])
+        numeric_cols = w_all.select_dtypes(include=[np.number]).columns
+        w_all[numeric_cols] = w_all[numeric_cols].apply(pd.to_numeric, errors='coerce')
+        # Group by 'time' and calculate the mean for each group
+        w_ret = w_all.groupby('aifstime_utc').mean(numeric_only=True).reset_index()
+        w_ret['Year'] = w_ret['Year'].astype(int)
+        w_ret['Month'] = w_ret['Month'].astype(int)
+        w_ret['Day'] = w_ret['Day'].astype(int)
+        # w_ret['cloud'] = w_all['cloud']
+        # w_ret['cloud_type'] = w_all['cloud_type']
+        # w_ret['name'] = w_all['name']
+        # w_ret['press_tend'] = w_all['press_tend']
+        # # w_ret['rain_trace'] = w_all['rain_trace']
+        # w_ret['local_date_time'] = w_all['local_date_time']
+        # w_ret['local_date_time_full'] = w_all['local_date_time_full']
+        # w_ret['history_product'] = w_all['history_product']
+        # w_ret['local_date_time_full'] = w_all['local_date_time_full']
+        # w_ret['vis_km'] = w_all['vis_km']
+        # w_ret['weather'] = w_all['weather']
+        # w_ret['wind_dir'] = w_all['wind_dir']
+        # w_ret['wind_dir'] = w_all['wind_dir']
+        # w_ret['U_z'] = w_all['U_z']
         
     end_time = time.time()
     time_elapsed = (end_time - start_time)
@@ -5084,14 +5072,14 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
     weather_functions = [
         lambda geoid, start_date, end_date=end_date: getWeatherFromNCEP(geoid, start_date, end_date),
         lambda geoid, start_date, end_date=end_date: getWeatherFromAUS(geoid, start_date, end_date),
-        lambda geoid, start_date, end_date=end_date: getWeatherFromNOAA(geoid, start_date, end_date),
-        lambda geoid, start_date, end_date=end_date: getWeatherFromGHCND(geoid, start_date, end_date),
-        lambda geoid, start_date, end_date=end_date: getWeatherFromNLDAS(geoid, start_date, end_date),
-        lambda geoid, start_date, end_date=end_date: getWeatherFromCIMIS(geoid, start_date, end_date)
+        # lambda geoid, start_date, end_date=end_date: getWeatherFromNOAA(geoid, start_date, end_date),
+        # lambda geoid, start_date, end_date=end_date: getWeatherFromGHCND(geoid, start_date, end_date),
+        # lambda geoid, start_date, end_date=end_date: getWeatherFromNLDAS(geoid, start_date, end_date),
+        # lambda geoid, start_date, end_date=end_date: getWeatherFromCIMIS(geoid, start_date, end_date)
     ]
 
     # Source names corresponding to the functions
-    source_names = ['NCEP', 'AUS', 'NOAA', 'GHCND', 'NLDAS', 'CIMIS']
+    source_names = ['NCEP', 'AUS','CIMIS','GHCND','NLDAS','NOAA']
 
     # Parallel execution with source tracking
     with ThreadPoolExecutor() as executor:
@@ -5099,6 +5087,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
             executor.submit(func, geoid, start_date, end_date): name
             for func, name in zip(weather_functions, source_names)
         }
+        
         dataframes = []
         for future in futures:
             df = future.result()
@@ -5118,7 +5107,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
 
     # Perform additional cleaning
     merged_df = merged_df.drop_duplicates().fillna(method='ffill')
-
+    merged_df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
     # Rename 'Date' to 'date' if present
     if 'Date' in merged_df.columns:
         merged_df.rename(columns={'Date': 'date'}, inplace=True)
@@ -6239,28 +6228,27 @@ def getWeatherfunc():
     geoid = request.args.get('geoid')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date', None)
-    
+
     if not geoid or not start_date:
         return jsonify({"error": "Missing required parameters: geoid and start_date"}), 400
 
     # Get weather data
     weather_data = getWeatherForDates(geoid, start_date, end_date)
     
-    # Handle NaT values in the DataFrame
-    # res_df.fillna({"datetime_column": "N/A"}, inplace=True)  # Replace with column name and value
-    # Alternatively, replace all NaT values with None (JSON-compatible)
-    # res_df = res_df.where(pd.notnull(res_df), None)
+    print(weather_data)
 
-    # Convert to JSON-compatible format
-    # json_data = res_df.to_dict(orient='records')
+    # Handle NaT values in the DataFrame
+    if isinstance(weather_data, pd.DataFrame):
+        weather_data = weather_data.where(pd.notnull(weather_data), None)  # Convert NaT to None
 
     response = {
-        "data": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(),
+        "data": weather_data.to_dict(orient="records") if isinstance(weather_data, pd.DataFrame) else weather_data,
         "metadata": weatherMetadata(),
         "metadata-description": weatherMetadata_desc()
     }
 
     return jsonify(response)
+
 
 
     

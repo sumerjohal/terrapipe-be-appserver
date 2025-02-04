@@ -28644,6 +28644,7 @@ def getRNet(rad_df):
     rad_df = rad_df.rename(columns={
         "ULWRF_surface": "LW_U",
         "USWRF_surface": "SW_U",
+        "DSWRF_surface":"SW_D",
         "DLWRF_surface": "LW_D",
 })
     SW_D_df = rad_df.loc[:,'SW_D']
@@ -28654,107 +28655,402 @@ def getRNet(rad_df):
     rad_df['RNet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
     return pd.DataFrame(rad_df.loc[:,'RNet'])
 
-import numpy as np
-import pandas as pd
-import geopandas as gpd
-from shapely.geometry import Point
-from concurrent.futures import ThreadPoolExecutor
 
 
 def getWeatherForGeoid(df, agstack_geoid):
-    # Get region-specific config
+    """Process weather data with the specified data flow"""
+
     region = getRegion(agstack_geoid)
-    print(f'region--{region}')
-    region_config = REGION_CONFIG.get(region, REGION_CONFIG['OTHER'])
-    sources = region_config['sources']
-    region_weights = region_config['weights']
-    max_stations = region_config['max_stations']
-
-    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']
-    temp_columns = ['T_mean']
-
-    # Convert temperature to Kelvin
-    df[temp_columns] += 273.15
-
-    # Data preparation for specific sources
-    if df.source.any() == 'AUS':
-        print(f'souce--{df.source}')
-        print(df.columns)
-        df['Avg_Eto'] = df['ETo_AVG_IN']
-        df['WindRun'] = df['U_z']
-    elif region == 'USA-CA':
-        df['Avg_Eto'] = df['ETo_AVG_IN']
-        df['WindRun'] = df['U_z']
-    elif region == 'USA-!CA':
-        df['Avg_Eto'] = df['ETo_AVG_IN']
-        df['WindRun'] = df['U_z']
-    else :
-        df['Avg_Eto'] = np.nan
-        df['WindRun'] = np.nan
-
-        
-    if df['source'].any() == 'NCEP':
-        df['R_net'] = getRNet(df)
-        df['T_mean'] = df['T_mean']
-
-    # Create 'Date' column from year, month, day
-    df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']])
+    config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']  # Updated
     
-    # Remove duplicates by averaging numeric columns
-    if df['Date'].duplicated().any():
-        df = df.groupby('Date').mean(numeric_only=True).reset_index()
-
-    # Reindex for missing dates and interpolate
-    full_date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
+    # Preprocess data sources
+    df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+    df = df.dropna(subset=['Date'])
+    print(df.columns)
+    start_date = df['Date'].min()
+    end_date = df['Date'].max()
+    full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
     df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
     df = df.interpolate(method='linear')
-
-    # Helper function to process a single date
-    def process_date(dt):
-        df_dt = df[df['Date'] == dt]
-
-        if 'longitude' not in df_dt.columns or 'latitude' not in df_dt.columns:
-            print("Missing 'longitude' or 'latitude'. Falling back to 'lat' and 'lon'.")
-            geometry = [Point(xy) for xy in zip(df_dt.get('lat', []), df_dt.get('lon', []))]
-        else:
-            geometry = [Point(xy) for xy in zip(df_dt['latitude'], df_dt['longitude'])]
-
-        gdf = gpd.GeoDataFrame(df_dt, geometry=geometry)
-        centroid = gdf.geometry.unary_union.centroid
-
-        # Calculate nearest stations
-        stnPoints = list(pd.unique(gdf.geometry))
-        ids, pts, dis, wts = getNearestNStnID(centroid, stnPoints, 5)
-        df_dt['StationId'] = create_station_id(stnPoints, centroid)
-        stns = pd.unique(df['StationId'])
-        nearestStnIDs = stns[ids] if len(stns) > max(ids) else stns[:len(ids)]
-
-        # Calculate weighted averages
-        weighted_avg = {col: 0 for col in required_columns}
-        for i, stn_id in enumerate(nearestStnIDs):
-            # Get unique station IDs
-
-            df_stn = df_dt[df_dt['StationId'] == stn_id]
+    
+    final_source_df = pd.DataFrame()
+    def process_date(df, current_date):
+        """Process data for a single date"""
+        date_data = df[df['Date'] == current_date]
+        if date_data.empty:
+            return None
+    
+        source_results = {}
+        # Process each source separately
+        for source, weight in zip(config['sources'], config['weights']):
+            source_df = date_data[date_data['source'] == source]
+            if source_df.empty:
+                continue
+            
+            # Apply source-specific processing
+            try:
+                if source == 'AUS' and region == 'AUS':
+                    source_df = process_aus(source_df)
+                elif source == 'NCEP':
+                    source_df = process_ncep(source_df)
+            except Exception as e:
+                print(f"Error processing {source} data: {e}")
+                continue
+            print(source_df[['Avg_Eto', 'WindRun']].isna().sum())
+            # Ensure all required columns exist
             for col in required_columns:
-                value = df_stn[col].mean() if not df_stn[col].isna().all() else np.nan
-                weighted_avg[col] += value * wts[i]
+                if col not in source_df.columns:
+                    source_df[col] = np.nan  # Assign NaN if missing
+            wkt = fetchWKT(agstack_geoid)
+            polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
+            geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+            coords = list(polygon.exterior.coords)
+            
+            lon_col = None
+            if 'lon' in source_df.columns:
+                lon_col = 'lon'
+            elif 'longitude' in source_df.columns:
+                lon_col = 'longitude'
+                
+            lat_col = None
+            if 'lat' in source_df.columns:
+                lat_col = 'lat'
+            elif 'latitude' in source_df.columns:
+                lat_col = 'latitude'
 
-        # Adjust using region weights
-        for i, source in enumerate(sources):
-            source_weight = region_weights[i] if i < len(region_weights) else 0
-            for col in required_columns:
-                weighted_avg[col] += weighted_avg[col] * source_weight
+            if not lon_col or not lat_col:
+                print(f"Missing coordinates for {source} data")
+                continue
+            
 
-        weighted_avg['Date'] = dt
-        return weighted_avg
+            geometry = [Point(lon, lat) for lon, lat in zip(source_df[lon_col], source_df[lat_col])]
+            gdf = gpd.GeoDataFrame(source_df, geometry=geometry, crs="EPSG:4326")
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])  # Close the polygon manually
+            stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
 
-    # Process all dates in parallel
+            # df['StationId'] = create_station_id(stnPoints ,centroid)
+            # stns = pd.unique(df.StationId)
+            
+            # Proper weight calculation (missing in current code):
+            distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
+            nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
+            nearest_data = source_df.iloc[nearest_idx]
+            dist_values = distances.iloc[nearest_idx].values
+            weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
+            weights /= weights.sum()  # Normalize to sum=1
+
+            # Print station points (lat, lon) for the nearest stations
+            # Print station details with weights
+            # print(f"\n--- {source} source weights for {current_date.date()} ---")
+            # print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
+            for i, idx in enumerate(nearest_idx):
+                station = source_df.iloc[idx]
+                distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
+                # print(f"Station {i+1}:")
+                # print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
+                # print(f"  Distance: {distance_km:.2f} km")
+                # print(f"  Weight: {weights[i]:.4f}")
+                # print(f"  Contributing values:")
+                # for col in required_columns:
+                #     print(f"    {col}: {station[col]:.2f}")
+                
+                print(source_df)
+            return source_df.iloc[0].to_dict()
+
     unique_dates = df['Date'].unique()
+#     # Process all dates in parallel
     with ThreadPoolExecutor() as executor:
-        results = list(executor.map(process_date, unique_dates))
+        results = list(executor.map(partial(process_date, df), unique_dates))
+    
+    final_df = pd.DataFrame([r for r in results if r is not None])
 
-    # Combine results into a DataFrame
-    df_weather_for_dates = pd.DataFrame(results)
-    return df_weather_for_dates
+    # Keep only required columns
+    final_df = final_df[['Date'] + required_columns]  # Include 'Date' if needed
 
+    # final_df.set_index('Date', inplace=True)
+    return final_df.reset_index(drop=True) 
+
+
+
+# def getWeatherForGeoid(df, agstack_geoid):
+#     """Process weather data with the specified data flow"""
+
+#     region = getRegion(agstack_geoid)
+#     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+#     required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']  # Updated
+    
+#     # Preprocess data sources
+#     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+#     df = df.dropna(subset=['Date'])
+#     print(df.columns)
+#     start_date = df['Date'].min()
+#     end_date = df['Date'].max()
+#     full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+#     df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+#     df = df.interpolate(method='linear')
+    
+#     def process_date(df, current_date):
+#         """Process data for a single date"""
+#         date_data = df[df['Date'] == current_date]
+#         if date_data.empty:
+#             return None
+    
+#         source_results = {}
+        
+#         # Process each source separately
+#         for source, weight in zip(config['sources'], config['weights']):
+#             source_df = date_data[date_data['source'] == source]
+#             if source_df.empty:
+#                 continue
+            
+#             # Apply source-specific processing
+#             try:
+#                 if source == 'AUS' and region == 'AUS':
+#                     source_df = process_aus(source_df)
+#                 elif source == 'NCEP':
+#                     source_df = process_ncep(source_df)
+#             except Exception as e:
+#                 print(f"Error processing {source} data: {e}")
+#                 continue
+                
+#             # Ensure all required columns exist
+#             for col in required_columns:
+#                 if col not in source_df.columns:
+#                     source_df[col] = np.nan  # Assign NaN if missing
+#             wkt = fetchWKT(agstack_geoid)
+#             polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
+#             geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+#             coords = list(polygon.exterior.coords)
+            
+#             lon_col = None
+#             if 'lon' in source_df.columns:
+#                 lon_col = 'lon'
+#             elif 'longitude' in source_df.columns:
+#                 lon_col = 'longitude'
+                
+#             lat_col = None
+#             if 'lat' in source_df.columns:
+#                 lat_col = 'lat'
+#             elif 'latitude' in source_df.columns:
+#                 lat_col = 'latitude'
+
+#             if not lon_col or not lat_col:
+#                 print(f"Missing coordinates for {source} data")
+#                 continue
+
+#             geometry = [Point(lon, lat) for lon, lat in zip(source_df[lon_col], source_df[lat_col])]
+#             gdf = gpd.GeoDataFrame(source_df, geometry=geometry, crs="EPSG:4326")
+#             if coords[0] != coords[-1]:
+#                 coords.append(coords[0])  # Close the polygon manually
+#             stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
+
+#             # df['StationId'] = create_station_id(stnPoints ,centroid)
+#             # stns = pd.unique(df.StationId)
+            
+#             # Proper weight calculation (missing in current code):
+#             distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
+#             nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
+#             nearest_data = source_df.iloc[nearest_idx]
+#             dist_values = distances.iloc[nearest_idx].values
+#             weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
+#             weights /= weights.sum()  # Normalize to sum=1
+
+#             # Print station points (lat, lon) for the nearest stations
+#             # Print station details with weights
+#             print(f"\n--- {source} source weights for {current_date.date()} ---")
+#             print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
+#             for i, idx in enumerate(nearest_idx):
+#                 station = source_df.iloc[idx]
+#                 distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
+#                 print(f"Station {i+1}:")
+#                 print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
+#                 print(f"  Distance: {distance_km:.2f} km")
+#                 print(f"  Weight: {weights[i]:.4f}")
+#                 print(f"  Contributing values:")
+#                 for col in required_columns:
+#                     print(f"    {col}: {station[col]:.2f}")
+                    
+#             # Calculate weighted averages for the nearest stations
+#             weighted_data = []
+#             for i, idx in enumerate(nearest_idx):
+#                 station_data = nearest_data.iloc[i]
+#                 weighted_station = {
+#                     col: station_data[col] * config['weights'][i]  # Assuming config contains weights
+#                     for col in required_columns  # Now uses correct columns
+#                 }
+#                 weighted_data.append(weighted_station)
+            
+#             # Aggregate the weighted data
+#             source_avg = {col: np.sum([d[col] for d in weighted_data]) for col in required_columns}
+#             source_results[source] = source_avg
+        
+#         # Combine sources using region weights
+#         final_avg = combine_sources(source_results, config)
+#         final_avg['Date'] = current_date
+        
+#         return final_avg
+    
+#     unique_dates = df['Date'].unique()
+#     # Process all dates in parallel
+#     with ThreadPoolExecutor() as executor:
+#         results = list(executor.map(partial(process_date, df), unique_dates))
+    
+#     # Create final DataFrame
+#     final_df = pd.DataFrame([r for r in results if r is not None])
+#     final_df.set_index('Date', inplace=True)
+    
+#     return final_df.reset_index()
+
+def process_aus(source_df):
+    """Process AUS source data"""
+    
+    source_df['Avg_Eto']=source_df['ETo_AVG_IN']
+    source_df['WindRun'] = source_df['U_z']
+    # Convert Celsius to Kelvin if needed
+    if 'T_mean' in source_df.columns and source_df['T_mean'].max() < 200:
+        source_df['T_mean'] += 273.15
+        
+    return source_df
+
+def process_ncep(source_df):
+    """Process NCEP source data"""
+    required_ncep_columns = ['R_net']
+
+    df = source_df.copy()
+
+    # Check for missing columns first
+    missing = [col for col in required_ncep_columns if col not in df.columns]
+    if missing and 'R_net' not in missing:  # Allow R_net since we generate it
+        raise ValueError(f"Missing NCEP columns: {missing}")
+
+
+    # Generate R_net
+    df['R_net'] = getRNet(df)
+
+    return df
+
+
+def calculate_weighted_average(df, weights, columns):
+    """Calculate weighted average for specified columns"""
+    return {
+        col: np.average(df[col].values, weights=weights)
+        for col in columns
+    }
+
+def combine_sources(source_data, config):
+    """Combine source averages using region weights"""
+    combined = {col: 0.0 for col in ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']}  # Fixed
+    total_weight = 0.0
+    
+    for source, weight in zip(config['sources'], config['weights']):
+        if source in source_data:
+            for col in combined:
+                combined[col] += source_data[source].get(col, 0) * weight
+            total_weight += weight
+    
+    if total_weight > 0:
+        for col in combined:
+            combined[col] /= total_weight
+            
+    return combined
+
+
+# def getWeatherForGeoid(df, agstack_geoid):
+
+#     # Get region-specific config
+#     region = getRegion(agstack_geoid)
+#     print(f'region--{region}')
+#     region_config = REGION_CONFIG.get(region, REGION_CONFIG['OTHER'])
+#     sources = region_config['sources']
+#     region_weights = region_config['weights']
+#     max_stations = region_config['max_stations']
+
+#     required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']
+#     print("Data sources present:", df['source'].unique())
+#     # Source-specific mappings with REGION checks
+#     if (df['source'] == 'AUS').any() and region == 'AUS':
+        
+#         df['Avg_Eto'] = df['ETo_AVG_IN']
+#         df['WindRun'] = df['U_z']
+        
+#         print(df[['Avg_Eto','WindRun']].head(30))
+#     # Explicitly check both source and region for NCEP
+#     if (df['source'] == 'NCEP').any():
+#         df['T_mean'] += 273.15  # Only if NCEP data is in Celsius
+#         df['R_net'] = getRNet(df)  # Ensure getRNet uses NCEP columns
+#         print(df[['R_net','T_mean']].head(30))
+    
+#     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+#     # Create Date column with validation
+#     df = df.dropna(subset=['Date'])  # Remove invalid dates
+    
+#     # Remove duplicates by averaging nyyumeric columns
+#     if df['Date'].duplicated().any():
+#         df = df.groupby('Date').mean(numeric_only=True).reset_index()
+
+#     # Reindex for missing dates and interpolate
+
+#     # Create full date range using SAFEGUARDED dates
+#     start_date = df['Date'].min()
+#     end_date = df['Date'].max()
+#     full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+#     df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+#     df = df.interpolate(method='linear')
+
+#     # Helper function to process a single date
+#     def process_date(df,dt):
+#         print(df.head())
+#         df = df[df['Date'] == dt]
+#         if 'longitude' not in df.columns or 'latitude' not in df.columns:
+#             # print("Missing 'longitude' or 'latitude'. Falling back to 'lat' and 'lon'.")
+#             geometry = [Point(xy) for xy in zip(df.get('lat', []), df.get('lon', []))]
+#         else:
+#             geometry = [Point(xy) for xy in zip(df['latitude'], df['longitude'])]
+
+#         gdf = gpd.GeoDataFrame(df, geometry=geometry)
+#         centroid = gdf.geometry.unary_union.centroid
+#         # Calculate nearest stations
+#         stnPoints = list(pd.unique(gdf.geometry))
+#         ids, pts, dis, wts = getNearestNStnID(centroid, stnPoints, 5)
+#         df['StationId'] = create_station_id(stnPoints, centroid)
+#         # print("Created StationId:", df['StationId'].head())
+
+#         stns = pd.unique(df['StationId'])
+#         nearestStnIDs = [stns[i] for i in ids if i < len(stns)]
+
+#         # Calculate weighted averages
+#         weighted_avg = {col: 0 for col in required_columns}
+#         for i, stn_id in enumerate(nearestStnIDs):
+            
+#             # Get unique station IDs
+#             df_stn = df[df['StationId'] == stn_id]
+#             for col in required_columns:
+#                 # Use .get() to handle potential missing columns
+#                 value = df_stn.get(col, pd.Series([np.nan])).mean(skipna=True)
+#                 if not np.isnan(value):
+#                     weighted_avg[col] += value * wts[i]
+
+#         for i, source in enumerate(sources):
+#             source_weight = region_weights[i]  # ...
+#             for col in required_columns:
+#                 weighted_avg[col] += weighted_avg[col] * source_weight  # Incorrect
+
+#         # Normalize weights
+#         total_weight = sum(region_weights)
+#         if total_weight > 0:
+#             for col in required_columns:
+#                 weighted_avg[col] /= total_weight
+#         weighted_avg['Date'] = dt
+#         return weighted_avg
+
+#     # Process all dates in parallel
+#     unique_dates = df['Date'].unique()
+#     with ThreadPoolExecutor() as executor:
+#         results = list(executor.map(partial(process_date, df), unique_dates))
+
+#     # Combine results into a DataFrame
+#     df_weather_for_dates = pd.DataFrame(results)
+#     return df_weather_for_dates
 
