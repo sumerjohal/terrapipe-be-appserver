@@ -28574,16 +28574,19 @@ world_gdf = world_gdf.set_crs(4326)
 
 #AUS
 aus_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('Australia', case=False, na=False)].reset_index()
-
-# United States of America
+# Get USA
 usa_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('United States of America', case=False, na=False)].reset_index()
+
+# Get California
+ca_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('California', case=False, na=False)].reset_index()
+
 
 def getRegion(geoid):
     #get the polygon and its centroid
     if (aus_gdf.contains(getCentroidforGeoid(geoid))[0]):
         return 'AUS'
     if (usa_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within the US
-        if (ca_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within CA
+        if not ca_gdf.empty and ca_gdf.contains(getCentroidforGeoid(geoid)).any(): #point is within CA
             return 'USA-CA'
         else:
             return 'USA-!CA'
@@ -28656,123 +28659,217 @@ def getRNet(rad_df):
     return pd.DataFrame(rad_df.loc[:,'RNet'])
 
 
-
 def getWeatherForGeoid(df, agstack_geoid):
     """Process weather data with the specified data flow"""
-
     region = getRegion(agstack_geoid)
     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
-    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']  # Updated
+    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']
     
-    # Preprocess data sources
-    df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
-    df = df.dropna(subset=['Date'])
-    print(df.columns)
-    start_date = df['Date'].min()
-    end_date = df['Date'].max()
-    full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-    df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
-    df = df.interpolate(method='linear')
+    # Immediately return empty dataframe with required columns if input is empty
+    if df.empty:
+        return pd.DataFrame(columns=required_columns)
     
-    final_source_df = pd.DataFrame()
-    def process_date(df, current_date):
+    try:
+        # Preprocess data sources
+        df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+        df = df.dropna(subset=['Date'])
+        
+        start_date = df['Date'].min()
+        end_date = df['Date'].max()
+        full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+        df = df.interpolate(method='linear')
+    except Exception as e:
+        print(f"Preprocessing error: {e}")
+        return pd.DataFrame(columns=required_columns)
+
+    def process_date(current_date):
         """Process data for a single date"""
         date_data = df[df['Date'] == current_date]
         if date_data.empty:
             return None
-    
-        source_results = {}
-        # Process each source separately
+
+        source_records = []
         for source, weight in zip(config['sources'], config['weights']):
             source_df = date_data[date_data['source'] == source]
             if source_df.empty:
                 continue
-            
-            # Apply source-specific processing
+
             try:
+                # Process source-specific data
                 if source == 'AUS' and region == 'AUS':
-                    source_df = process_aus(source_df)
-                elif source == 'NCEP':
-                    source_df = process_ncep(source_df)
+                    processed_df = process_aus(source_df)
+                elif source == 'NCEP' or source == 'NLDAS':
+                    processed_df = process_ncep(source_df)
+                elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
+                    processed_df = process_cimis_noaa(source_df)
+                elif region == 'USA-!CA' and source in ['NOAA', 'GHCND']:
+                    processed_df = process_noaa_ghcnd(source_df)
+                elif region == 'OTHER':
+                    processed_df = process_other_region(source_df)
+                else:
+                    continue
             except Exception as e:
                 print(f"Error processing {source} data: {e}")
                 continue
-            print(source_df[['Avg_Eto', 'WindRun']].isna().sum())
-            # Ensure all required columns exist
+
+            # Ensure required columns exist
             for col in required_columns:
-                if col not in source_df.columns:
-                    source_df[col] = np.nan  # Assign NaN if missing
-            wkt = fetchWKT(agstack_geoid)
-            polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
-            geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
-            coords = list(polygon.exterior.coords)
-            
-            lon_col = None
-            if 'lon' in source_df.columns:
-                lon_col = 'lon'
-            elif 'longitude' in source_df.columns:
-                lon_col = 'longitude'
-                
-            lat_col = None
-            if 'lat' in source_df.columns:
-                lat_col = 'lat'
-            elif 'latitude' in source_df.columns:
-                lat_col = 'latitude'
+                if col not in processed_df.columns:
+                    processed_df[col] = 0.0
 
-            if not lon_col or not lat_col:
-                print(f"Missing coordinates for {source} data")
-                continue
-            
+            # Append valid records
+            source_records.extend(processed_df[required_columns].to_dict('records'))
 
-            geometry = [Point(lon, lat) for lon, lat in zip(source_df[lon_col], source_df[lat_col])]
-            gdf = gpd.GeoDataFrame(source_df, geometry=geometry, crs="EPSG:4326")
-            if coords[0] != coords[-1]:
-                coords.append(coords[0])  # Close the polygon manually
-            stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
+        # If no valid data, return None
+        if not source_records:
+            return None
 
-            # df['StationId'] = create_station_id(stnPoints ,centroid)
-            # stns = pd.unique(df.StationId)
-            
-            # Proper weight calculation (missing in current code):
-            distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
-            nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
-            nearest_data = source_df.iloc[nearest_idx]
-            dist_values = distances.iloc[nearest_idx].values
-            weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
-            weights /= weights.sum()  # Normalize to sum=1
+        # Combine valid values across all sources
+        combined = {
+            'Avg_Eto': np.nanmean([d.get('Avg_Eto') for d in source_records]),
+            'WindRun': np.nanmean([d.get('WindRun') for d in source_records]),
+            'R_net': np.nanmean([d.get('R_net') for d in source_records]),
+            'T_mean': np.nanmean([d.get('T_mean') for d in source_records]),
+            'Date': current_date
+        }
 
-            # Print station points (lat, lon) for the nearest stations
-            # Print station details with weights
-            # print(f"\n--- {source} source weights for {current_date.date()} ---")
-            # print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
-            for i, idx in enumerate(nearest_idx):
-                station = source_df.iloc[idx]
-                distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
-                # print(f"Station {i+1}:")
-                # print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
-                # print(f"  Distance: {distance_km:.2f} km")
-                # print(f"  Weight: {weights[i]:.4f}")
-                # print(f"  Contributing values:")
-                # for col in required_columns:
-                #     print(f"    {col}: {station[col]:.2f}")
-                
-                print(source_df)
-            return source_df.iloc[0].to_dict()
+        return combined
 
+    # Main processing flow
     unique_dates = df['Date'].unique()
-#     # Process all dates in parallel
+    final_results = []
     with ThreadPoolExecutor() as executor:
-        results = list(executor.map(partial(process_date, df), unique_dates))
+        futures = [executor.submit(process_date, date) for date in unique_dates]
+        for future in futures:
+            result = future.result()
+            if result:
+                final_results.append(result)
+
+    # Convert results to DataFrame if non-empty
+    final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
+    return final_df.reset_index(drop=True)
+
+
+
+def process_aus(source_df):
+    """Process AUS source data"""
     
-    final_df = pd.DataFrame([r for r in results if r is not None])
+    source_df['Avg_Eto']=source_df['ETo_AVG_IN']
+    source_df['WindRun'] = source_df['U_z']
+    # Convert Celsius to Kelvin if needed
+    if 'T_mean' in source_df.columns and source_df['T_mean'].max() < 200:
+        source_df['T_mean'] += 273.15
+        
+    if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
+        source_df['R_net'] = getRNet(source_df)
+        
+    return source_df
 
-    # Keep only required columns
-    final_df = final_df[['Date'] + required_columns]  # Include 'Date' if needed
+def process_ncep(source_df):
+    """Process NCEP source data"""
+    required_ncep_columns = ['R_net']
+    df = source_df.copy()
+    # Check for missing columns first
+    missing = [col for col in required_ncep_columns if col not in df.columns]
+    if missing and 'R_net' not in missing:  # Allow R_net since we generate it
+        raise ValueError(f"Missing NCEP columns: {missing}")
+    # Generate R_net
+    df['R_net'] = getRNet(df)
 
-    # final_df.set_index('Date', inplace=True)
-    return final_df.reset_index(drop=True) 
+    return df
+
+def process_cimis_noaa(source_df):
+    """Process CIMIS, NOAA, and NCEP data for ETo, Tavg, and WindRun"""
+
+    # Get ETo from CIMIS (only if source is CIMIS)
+    cimis_eto = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyEto' in source_df.columns else None
+
+    # Get ETo from NOAA (only if source is NOAA)
+    noaa_eto = source_df.loc[source_df['source'] == 'NOAA'] if 'ETo_AVG_IN' in source_df.columns else None
+
+    # Compute average ETo if both are present
+    eto_values = [t for t in [cimis_eto, noaa_eto] if t is not None]
+    if eto_values:
+        source_df['Avg_Eto'] = sum(eto_values) / len(eto_values)
+
+    # Get T_mean from each source
+    tavg_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'T_mean' in source_df.columns else None
+    tavg_noaa = source_df.loc[source_df['source'] == 'NOAA'] if 'T_mean' in source_df.columns else None
+    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP'] if 'T_mean' in source_df.columns else None
+
+    # Compute average T_mean if at least one exists
+    tavg_values = [t for t in [tavg_cimis, tavg_noaa, tavg_ncep] if t is not None]
+    if tavg_values:
+        source_df['T_mean'] = sum(tavg_values) / len(tavg_values)
+
+    # Get WindRun from NCEP and CIMIS (with correct source filtering)
+    ncep_windrun = source_df.loc[source_df['source'] == 'NCEP'] if 'GUST_surface' in source_df.columns else None
+    cimis_windrun = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyWindSpd' in source_df.columns else None
+
+    # Compute WindRun average
+    wind_values = [w for w in [ncep_windrun, cimis_windrun] if w is not None]
+    if wind_values:
+        source_df['WindRun'] = sum(wind_values) / len(wind_values)
+    
+    rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
+    if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
+        ncep_rnet = getRNet(df)
+        # ncep_rnet = ncep_source_df['R_net']
+        
+        # Compute WindRun average
+    r_net_values = [w for w in [rnet_cimis, ncep_rnet] if w is not None]
+
+    if wind_values:
+        source_df['R_net'] = sum(r_net_values) / len(r_net_values)
+    
+    return source_df
 
 
+
+def process_noaa_ghcnd(source_df):
+    """Process NOAA and GHCND data"""
+    
+    # Get ETo from CIMIS (only if source is CIMIS)
+    ghcnd_eto = source_df.loc[source_df['source'] == 'GHNCD'] if 'ETo_AVG_IN' in source_df.columns else None
+
+    # Get ETo from NOAA (only if source is NOAA)
+    noaa_eto = source_df.loc[source_df['source'] == 'NOAA'] if 'ETo_AVG_IN' in source_df.columns else None
+
+    # Compute average ETo if both are present
+    eto_values = [t for t in [ghcnd_eto, noaa_eto] if t is not None]
+    if eto_values:
+        source_df['Avg_Eto'] = sum(eto_values) / len(eto_values)
+        
+    tavg_noaa = source_df.loc[source_df['source'] == 'NOAA'] if 'T_mean' in source_df.columns else None
+    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP'] if 'T_mean' in source_df.columns else None
+    # Compute average T_mean if at least one exists
+    tavg_values = [t for t in [tavg_noaa, tavg_ncep] if t is not None]
+    if tavg_values:
+        source_df['T_mean'] = sum(tavg_values) / len(tavg_values)
+        
+    rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
+    if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
+        ncep_rnet = getRNet(df)
+        
+        # Compute WindRun average
+    r_net_values = [w for w in [rnet_cimis, ncep_rnet] if w is not None]
+
+    if wind_values:
+        source_df['R_net'] = sum(r_net_values) / len(r_net_values)
+    
+    return source_df
+
+def process_other_region(source_df):
+    source_df['Avg_Eto'] = source_df.loc[source_df['source'] == 'GHNCD'] if 'ETo_AVG_IN' in source_df.columns else None
+    
+    tavg_ghcnd = source_df.loc[source_df['source'] == 'GHNCD'] if 'T_mean' in source_df.columns else None
+    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP'] if 'T_mean' in source_df.columns else None
+    
+    tavg_values = [t for t in [tavg_ghcnd, tavg_ncep] if t is not None]
+    if tavg_values:
+        source_df['T_mean'] = sum(tavg_values) / len(tavg_values)
+    
 
 # def getWeatherForGeoid(df, agstack_geoid):
 #     """Process weather data with the specified data flow"""
@@ -28902,34 +28999,6 @@ def getWeatherForGeoid(df, agstack_geoid):
 #     final_df.set_index('Date', inplace=True)
     
 #     return final_df.reset_index()
-
-def process_aus(source_df):
-    """Process AUS source data"""
-    
-    source_df['Avg_Eto']=source_df['ETo_AVG_IN']
-    source_df['WindRun'] = source_df['U_z']
-    # Convert Celsius to Kelvin if needed
-    if 'T_mean' in source_df.columns and source_df['T_mean'].max() < 200:
-        source_df['T_mean'] += 273.15
-        
-    return source_df
-
-def process_ncep(source_df):
-    """Process NCEP source data"""
-    required_ncep_columns = ['R_net']
-
-    df = source_df.copy()
-
-    # Check for missing columns first
-    missing = [col for col in required_ncep_columns if col not in df.columns]
-    if missing and 'R_net' not in missing:  # Allow R_net since we generate it
-        raise ValueError(f"Missing NCEP columns: {missing}")
-
-
-    # Generate R_net
-    df['R_net'] = getRNet(df)
-
-    return df
 
 
 def calculate_weighted_average(df, weights, columns):

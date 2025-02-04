@@ -5064,51 +5064,60 @@ def weatherMetadata_desc():
 #     return result
 
 from concurrent.futures import ThreadPoolExecutor
-def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dict:
-    # Set end_date to today if not provided
+def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
     end_date = datetime.now().strftime('%Y-%m-%d') if end_date is None else end_date
 
-    # List of functions to retrieve weather data
     weather_functions = [
-        lambda geoid, start_date, end_date=end_date: getWeatherFromNCEP(geoid, start_date, end_date),
-        lambda geoid, start_date, end_date=end_date: getWeatherFromAUS(geoid, start_date, end_date),
-        # lambda geoid, start_date, end_date=end_date: getWeatherFromNOAA(geoid, start_date, end_date),
-        # lambda geoid, start_date, end_date=end_date: getWeatherFromGHCND(geoid, start_date, end_date),
-        # lambda geoid, start_date, end_date=end_date: getWeatherFromNLDAS(geoid, start_date, end_date),
-        # lambda geoid, start_date, end_date=end_date: getWeatherFromCIMIS(geoid, start_date, end_date)
+        getWeatherFromNCEP,
+        getWeatherFromAUS,
+        getWeatherFromNOAA,
+        getWeatherFromGHCND,
+        getWeatherFromNLDAS,
+        getWeatherFromCIMIS
     ]
+    source_names = ['NCEP', 'AUS', 'NOAA', 'GHCND', 'NLDAS', 'CIMIS']
 
-    # Source names corresponding to the functions
-    source_names = ['NCEP', 'AUS','CIMIS','GHCND','NLDAS','NOAA']
-
-    # Parallel execution with source tracking
     with ThreadPoolExecutor() as executor:
-        futures = {
-            executor.submit(func, geoid, start_date, end_date): name
-            for func, name in zip(weather_functions, source_names)
-        }
+        futures = {executor.submit(func, geoid, start_date, end_date): name for func, name in zip(weather_functions, source_names)}
         
         dataframes = []
         for future in futures:
             df = future.result()
-            df['source'] = futures[future]  # Add source column
-            # Process each dataframe individually before merging
+            source = futures[future]
+            
+            if df is None or df.empty:
+                # print(f"Warning: No data from {source}!")
+                continue  # Skip empty DataFrames
+            
+            # print(f"Data from {source} retrieved successfully.")
+            df['source'] = source  # Add source column
+            
+            # Process the data for consistency
             processed_df = getWeatherForGeoid(df, geoid)
             dataframes.append(processed_df)
 
-    # Concatenate all processed DataFrames
-    merged_df = pd.concat(dataframes, ignore_index=True)
+    if not dataframes:
+        print("No data available from any source.")
+        return pd.DataFrame()  # Return an empty DataFrame
 
-    # Flatten dictionary-like columns
-    for column in merged_df.columns:
-        if isinstance(merged_df[column].iloc[0], dict):
-            flattened = merged_df[column].apply(pd.Series)
-            merged_df = pd.concat([merged_df, flattened], axis=1).drop(columns=[column])
+    # Merge DataFrames while aligning columns
+    merged_df = pd.concat(dataframes, ignore_index=True, sort=False)
 
-    # Perform additional cleaning
-    merged_df = merged_df.drop_duplicates().fillna(method='ffill')
-    merged_df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
-    # Rename 'Date' to 'date' if present
+    # Ensure Date is properly formatted
+    if {'Year', 'Month', 'Day'}.issubset(merged_df.columns):
+        merged_df['Date'] = pd.to_datetime(merged_df[['Year', 'Month', 'Day']], errors='coerce')
+    
+    # Rename 'Date' to 'date' for consistency
+    if 'Date' in merged_df.columns:
+        merged_df.rename(columns={'Date': 'date'}, inplace=True)
+
+    # Ensure 'date' is a datetime object
+    merged_df['date'] = pd.to_datetime(merged_df['date'], errors='coerce')
+
+    # Remove duplicate rows and fill missing values forward
+    merged_df.drop_duplicates(inplace=True)
+    merged_df.fillna(method='ffill', inplace=True)
+    
     if 'Date' in merged_df.columns:
         merged_df.rename(columns={'Date': 'date'}, inplace=True)
 
@@ -5128,6 +5137,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dic
         result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
 
     return result
+
 
 
 # def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> dict:
@@ -6241,8 +6251,9 @@ def getWeatherfunc():
     if isinstance(weather_data, pd.DataFrame):
         weather_data = weather_data.where(pd.notnull(weather_data), None)  # Convert NaT to None
 
+    # Handle response based on whether it's a dataframe or dict
     response = {
-        "data": weather_data.to_dict(orient="records") if isinstance(weather_data, pd.DataFrame) else weather_data,
+        "data": weather_data if isinstance(weather_data, dict) else weather_data.to_dict(orient="records"),
         "metadata": weatherMetadata(),
         "metadata-description": weatherMetadata_desc()
     }
