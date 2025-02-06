@@ -1,3 +1,4 @@
+
 import sys
 import os
 #sys.path.append('/home/user/terrapipe')
@@ -3565,7 +3566,6 @@ def getWeatherFromNOAAFORECASTED(agstack_geoid, start_date,end_date):
         start_time = time.time()
         # Get the list of S2 indices and CIDs for the data point
         s2_index__L5_list, L5_cids = get_s2_cellids_and_token_list(5, [lat], [lon])
-        print(s2_index__L5_list)
     
         list_of_5_paths = [filePath + 's2_tokens_l5=' + x for x in s2_index__L5_list
                 if os.path.exists(filePath + 's2_tokens_l5=' + x)]
@@ -4666,7 +4666,7 @@ def getWeatherFromAUSFORECASTED(agstack_geoid, start_date, end_date=None):
         ]
 
         if not list_of_5_paths:
-            print("No relevant partitions found for S2 tokens.")
+            # print("No relevant partitions found for S2 tokens.")
             return empty_response()
 
         # Load datasets
@@ -4970,46 +4970,20 @@ def getWeatherFromJRC(agstack_geoid):
 
 def weatherMetadata():
     metadata = {
-        "time": "datetime (UTC)",
-        "T_mean": "K",
-        "T_max": "K",
-        "T_min": "K",
-        "GUST_surface": "m/s",
-        "PRATE_surface": "kg/m^2/s",
-        "RH_2maboveground": "%",
-        "DPT_2maboveground": "K",
-        "ULWRF_surface": "W/m^2",
-        "USWRF_surface": "W/m^2",
-        "DLWRF_surface": "W/m^2",
-        "DSWRF_surface": "W/m^2",
-        "TSOIL_0D1M0D4mbelowground": "K",
-        "TSOIL_0D4M1mbelowground": "K",
-        "TSOIL_0M0D1mbelowground": "K",
-        "Avg_Eto":"inches",
-        "WindRun":"m/s"
+        "Date": "datetime (UTC)",
+        "Tavg": "K",
+        "ETo__in":"inches",
+        "Wavg":"m/s"
     }
     
     return metadata
 
 def weatherMetadata_desc():
     metadata_desc = {
-        "time": "Timestamp in Coordinated Universal Time (UTC).",
-        "T_mean": "Mean Air Temperature at 2 meters above ground.",
-        "T_max": "Maximum Air Temperature at 2 meters above ground.",
-        "T_min": "Minimum Air Temperature at 2 meters above ground.",
-        "GUST_surface": "Wind speed (gust) at the surface.",
-        "PRATE_surface": "Precipitation rate at the surface.",
-        "RH_2maboveground": "Relative Humidity at 2 meters above ground.",
-        "DPT_2maboveground": "Dew Point Temperature at 2 meters above ground.",
-        "ULWRF_surface": "Upward Longwave Radiation Flux at the surface.",
-        "USWRF_surface": "Upward Shortwave Radiation Flux at the surface.",
-        "DLWRF_surface": "Downward Longwave Radiation Flux at the surface.",
-        "DSWRF_surface": "Downward Shortwave Radiation Flux at the surface.",
-        "TSOIL_0D1M0D4mbelowground": "Soil Temperature at 0.1 to 0.4 meters below ground.",
-        "TSOIL_0D4M1mbelowground": "Soil Temperature at 0.4 to 1 meter below ground.",
-        "TSOIL_0M0D1mbelowground": "Soil Temperature at 0 to 0.1 meters below ground.",
-        "Avg_Eto": "Average Evapotranspiration (in inches).",  
-        "WindRun": "Wind Run (in m/s), the total distance the wind has traveled."
+        "Date": "Timestamp in Coordinated Universal Time (UTC).",
+        "Tavg": "Mean Air Temperature at 2 meters above ground.",
+        "ETo__in": "Average Evapotranspiration (in inches).",  
+        "Wavg": "Wind Run (in m/s), the total distance the wind has traveled."
     }
     
     return metadata_desc
@@ -5063,19 +5037,381 @@ def weatherMetadata_desc():
 
 #     return result
 
+
+#load shapefiles for the region boundaries:
+shFileDir = '/home/user/terrapipe/shapefiles/'
+worldShpFile = shFileDir + 'WB_countries_Admin0_10m/WB_countries_Admin0_10m.shp'
+world_gdf = gpd.read_file(worldShpFile)
+world_gdf = world_gdf.set_crs(4326)
+
+#AUS
+aus_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('Australia', case=False, na=False)].reset_index()
+# Get USA
+usa_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('United States of America', case=False, na=False)].reset_index()
+
+# Get California
+ca_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('California', case=False, na=False)].reset_index()
+
+
+def getRegion(geoid):
+    #get the polygon and its centroid
+    if (aus_gdf.contains(getCentroidforGeoid(geoid))[0]):
+        return 'AUS'
+    if (usa_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within the US
+        if not ca_gdf.empty and ca_gdf.contains(getCentroidforGeoid(geoid)).any(): #point is within CA
+            return 'USA-CA'
+        else:
+            return 'USA-!CA'
+    else:
+        return 'OTHER'
+    
+def getCentroidforGeoid(geoid):
+    asset_registry_base = "https://api-ar.agstack.org"
+    res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
+    field_wkt = res['WKT']
+    p = shapely.wkt.loads(field_wkt)
+    c = p.centroid
+    return c
+
 from concurrent.futures import ThreadPoolExecutor
+
+# REGION_CONFIG with predefined region weights
+REGION_CONFIG = {
+    'USA-CA': {
+        'sources': ['CIMIS', 'NOAA', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.6, 0.2, 0.1, 0.05, 0.05],
+        'max_stations': 5
+    },
+    'USA-!CA': {
+        'sources': ['NOAA', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.7, 0.1, 0.1, 0.1],
+        'max_stations': 5
+    },
+    'AUS': {
+        'sources': ['AUS', 'GHCND', 'NCEP', 'NLDAS'],
+        'weights': [0.7, 0.1, 0.1, 0.1],
+        'max_stations': 5
+    },
+    'OTHER': {
+        'sources': ['NCEP', 'NLDAS'],  # Default global sources
+        'weights': [0.5, 0.5],
+        'max_stations': 3
+    }
+}
+
+def getRNet(rad_df):
+    """
+    Must have the following columns and units:
+    expected_units: {
+        "ULWRF_surface": "W/m^2",
+        "USWRF_surface": "W/m^2",
+        "DLWRF_surface": "W/m^2",
+        "DSWRF_surface": "W/m^2",
+    }
+    Map them to:
+    LW_U: float,
+    SW_U: float,
+    LW_D: float,
+    SW_D: float,
+    
+    return in W/m^2
+    """
+    rad_df = rad_df.rename(columns={
+        "ULWRF_surface": "LW_U",
+        "USWRF_surface": "SW_U",
+        "DSWRF_surface":"SW_D",
+        "DLWRF_surface": "LW_D",
+})
+    SW_D_df = rad_df.loc[:,'SW_D']
+    SW_U_df = rad_df.loc[:,'SW_U']
+    LW_D_df = rad_df.loc[:,'LW_D']
+    LW_U_df = rad_df.loc[:,'LW_U']
+    
+    rad_df['RNet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
+    return pd.DataFrame(rad_df.loc[:,'RNet'])
+
+def getWeatherForGeoid(df, agstack_geoid):
+    """Process weather data with the specified data flow"""
+    region = getRegion(agstack_geoid)
+    config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    
+    if df.empty:
+        return pd.DataFrame(columns=required_columns + ['Date'])
+
+    # Preprocess data sources
+    try:
+        df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+    except:
+        df['Date'] = df['TS']
+    
+    start_date = df['Date'].min()
+    end_date = df['Date'].max()
+    full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+    df = df.interpolate(method='linear')
+
+    def process_date(current_date):
+        """Process data for a single date"""
+        date_data = df[df['Date'] == current_date]
+        if date_data.empty:
+            return None
+
+        source_records = []
+        aus_forecasted_data = None  # Store AUS-FORECASTED data separately
+
+        for source in date_data['source'].unique():
+            source_df = date_data[date_data['source'] == source]
+            if source_df.empty:
+                continue
+            
+            # print(f'before aus function --{source}')
+        
+            # Process source-specific data
+            if source in ['AUS', 'AUS-FORECASTED'] and region == 'AUS':
+                processed_df = process_aus(source_df, source)
+
+            elif source in ['NCEP', 'NLDAS']:
+                processed_df = process_ncep(source_df)
+            elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
+                processed_df = process_cimis_noaa(source_df)
+            elif region == 'USA-!CA' and source in ['GHCND','NOAA','NOAA-FORECAST']:
+                processed_df = process_noaa_ghcnd(source_df,source)
+            elif region == 'OTHER':
+                processed_df = process_other_region(source_df)
+            else:
+                continue
+            
+            # Ensure required columns exist
+            for col in required_columns:
+                if col not in processed_df.columns:
+                    processed_df[col] = 0.0
+            
+            source_records.extend(processed_df.to_dict('records'))
+
+        if not source_records:
+            return None
+
+        # Convert to DataFrame for easier processing
+        source_df = pd.DataFrame(source_records)
+        
+        # Combine valid values across all sources, filtering None
+        resultDict = {}
+
+        if region == 'USA-!CA':    
+            for items in source_records:
+                # Check source type and assign values accordingly
+                # if items['source'] == 'NCEP':
+                #     if 'RNet' in items:
+                #         resultDict['RNet'] = items['RNet']
+                if items['source'] == 'NOAA':
+                    if 'Tavg' in items:
+                        resultDict['Tavg'] = items['Tavg']
+                elif items['source'] == 'NOAA-FORECAST':
+                    if 'Wavg' in items:
+                        resultDict['Wavg'] = items['Wavg']
+                    if 'RNet' in items:
+                        resultDict['RNet'] = items['RNet']
+                elif items['source'] == 'GHCND':
+                    if 'ETo__in' in items:
+                        resultDict['ETo__in'] = items['ETo__in']
+                # Ensure 'Date' key is always assigned, even if other keys are missing
+                if 'Date' in items:
+                    resultDict['Date'] = items['Date']
+        
+        elif region == 'AUS':
+            for items in source_records:
+                if items['source'] == 'AUS':
+                    if 'ETo__in' and 'Wavg' and 'Tavg' in items:
+                        resultDict['ETo__in'] = items['ETo__in']
+                        resultDict['Wavg'] = items['Wavg']
+                        resultDict['Tavg'] = items['Tavg']
+                elif items['source'] == 'AUS-FORECASTED':
+                    if 'RNet' in items:
+                        resultDict['RNet'] = items['RNet']
+                if 'Date' in items:
+                    resultDict['Date'] = items['Date']
+                      
+        return resultDict
+    
+    # Main processing flow
+    unique_dates = df['Date'].unique()
+    final_results = []
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_date, date) for date in unique_dates]
+        for future in futures:
+            result = future.result()
+            if result:
+                final_results.append(result)
+
+    # Convert results to DataFrame if non-empty
+    final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
+
+    return final_df.reset_index(drop=True)
+
+def reformat_datetime(df):
+    """Reformat datetime to string (YYYY-MM-DD) and reset index"""
+    df = df.reset_index().rename(columns={df.index.name or 'index': 'Date'})
+    df['Date'] = pd.to_datetime(df['Date'])  # Convert to datetime format
+    df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')  # Convert datetime to YYYY-MM-DD as a string
+    df = df.set_index('Date')  # Set it back as the index
+    return df
+
+def process_aus(source_df, source):
+    """Process AUS source data"""
+
+    aus_df = pd.DataFrame()
+    aus_df_forecast_df = pd.DataFrame()
+    if source == "AUS":
+        aus_df['ETo__in'] = source_df['ETo_AVG_IN']
+        aus_df['Wavg'] = source_df['U_z']    
+        aus_df['Tavg'] = source_df['T_mean'] + 273.15  # Convert to Kelvin
+
+    elif source == 'AUS-FORECASTED':
+        aus_df_forecast_df['RNet'] = source_df['R_n__MJpm2']
+       
+    # Join all dataframes (adjust if you need to join based on specific keys)
+    df_final = source_df.join([aus_df, aus_df_forecast_df])
+    
+    # Check if the required columns exist before printing
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    available_columns = [col for col in required_columns if col in df_final.columns]
+    return df_final
+
+def process_ncep(source_df):
+    """Process NCEP source data"""
+    required_ncep_columns = ['RNet']
+    df = source_df.copy()
+    # Check for missing columns first
+    missing = [col for col in required_ncep_columns if col not in df.columns]
+    if missing and 'RNet' not in missing:  # Allow R_net since we generate it
+        raise ValueError(f"Missing NCEP columns: {missing}")
+    # Generate R_net
+    df['RNet'] = getRNet(df)
+
+    return df
+
+def process_cimis_noaa(source_df):
+    """Process CIMIS, NOAA, and NCEP data for ETo, Tavg, and WindRun"""
+
+    # Get ETo from CIMIS (only if source is CIMIS)
+    cimis_eto = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyEto' in source_df.columns else None
+
+    # Get ETo from NOAA (only if source is NOAA)
+    noaa_eto = source_df.loc[source_df['source'] == 'NOAA'] if 'ETo_AVG_IN' in source_df.columns else None
+
+    # Compute average ETo if both are present
+    eto_values = [t for t in [cimis_eto, noaa_eto] if t is not None]
+    if eto_values:
+        source_df['ETo__in'] = sum(eto_values) / len(eto_values)
+
+    # Get T_mean from each source
+    tavg_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'T_mean' in source_df.columns else None
+    tavg_noaa = source_df.loc[source_df['source'] == 'NOAA'] if 'T_mean' in source_df.columns else None
+    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP'] if 'T_mean' in source_df.columns else None
+
+    # Compute average T_mean if at least one exists
+    tavg_values = [t for t in [tavg_cimis, tavg_noaa, tavg_ncep] if t is not None]
+    if tavg_values:
+        source_df['Tavg'] = sum(tavg_values) / len(tavg_values)
+
+    # Get WindRun from NCEP and CIMIS (with correct source filtering)
+    ncep_windrun = source_df.loc[source_df['source'] == 'NCEP'] if 'GUST_surface' in source_df.columns else None
+    cimis_windrun = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyWindSpd' in source_df.columns else None
+
+    # Compute WindRun average
+    wind_values = [w for w in [ncep_windrun, cimis_windrun] if w is not None]
+    if wind_values:
+        source_df['Wavg'] = sum(wind_values) / len(wind_values)
+    
+    rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
+    if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
+        ncep_rnet = getRNet(df)
+        # ncep_rnet = ncep_source_df['R_net']
+        
+        # Compute WindRun average
+    r_net_values = [w for w in [rnet_cimis, ncep_rnet] if w is not None]
+
+    if wind_values:
+        source_df['RNet'] = sum(r_net_values) / len(r_net_values)
+    
+    return source_df
+
+def process_noaa_ghcnd(source_df, source):
+    """Process NOAA and GHCND data"""
+    df = source_df.copy()
+    
+    # Initialize variables
+    ghcnd_eto, noaa_eto = None, None
+    ghcnd_df = pd.DataFrame()
+    noaa_df = pd.DataFrame()
+    noaa_forecast_df = pd.DataFrame()
+    
+    # Process based on source
+    if source == 'GHCND':
+        ghcnd_df['ETo__in'] = df['ETo_AVG_IN']
+        
+    # Process for NOAA source
+    if source == 'NOAA':
+        noaa_df['Tavg'] = df['T_mean']
+        # noaa_df['ETo__in'] = df['ETo_AVG_IN']  # Ensure ETo is assigned
+
+    # Process for NOAA-FORECAST source
+    if source == 'NOAA-FORECAST':
+        noaa_forecast_df['Wavg'] = df['U_z']
+        noaa_forecast_df['RNet'] = df['R_n__MJpm2']
+    
+    # Join all dataframes (adjust if you need to join based on specific keys)
+    df_final = source_df.join([ghcnd_df, noaa_df, noaa_forecast_df])
+    
+    # Check if the required columns exist before printing
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    available_columns = [col for col in required_columns if col in df_final.columns]
+    
+    return df_final
+
+
+def process_other_region(source_df,source):
+    
+    tavg_ghcnd = 0
+    tavg_ncep = 0
+    ghcnd_df = pd.DatFrame()
+    ncep_df = pd.DataFrame()
+    if source == "GHCND":
+        ghcnd_df['ETo__in'] = source_df['ETo_AVG_IN']
+        ghcnd_df['Wavg'] = source_df['AWND']
+        tavg_ghcnd = source_df['T_mean']
+    if source == 'NCEP' or source == 'NLDAS':
+        tavg_ncep = source_df['T_mean']
+        ncep_df['RNet'] = getRnet(source_df)
+        
+    tavg_values = [t for t in [tavg_ghcnd, tavg_ncep] if t is not None]
+    if tavg_values:
+        source_df['Tavg'] = sum(tavg_values) / len(tavg_values)
+        
+    # Join all dataframes (adjust if you need to join based on specific keys)
+    df_final = source_df.join([ghcnd_df, ncep_df])
+    
+    # Check if the required columns exist before printing
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    available_columns = [col for col in required_columns if col in df_final.columns]
+        
+    return df_final
+        
 def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
     end_date = datetime.now().strftime('%Y-%m-%d') if end_date is None else end_date
 
     weather_functions = [
         getWeatherFromNCEP,
         getWeatherFromAUS,
+        getWeatherFromAUSFORECASTED,
         getWeatherFromNOAA,
+        getWeatherFromNOAAFORECASTED,
         getWeatherFromGHCND,
         getWeatherFromNLDAS,
         getWeatherFromCIMIS
     ]
-    source_names = ['NCEP', 'AUS', 'NOAA', 'GHCND', 'NLDAS', 'CIMIS']
+    source_names = ['NCEP', 'AUS', 'AUS-FORECASTED','NOAA','NOAA-FORECAST', 'GHCND', 'NLDAS', 'CIMIS']
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(func, geoid, start_date, end_date): name for func, name in zip(weather_functions, source_names)}
@@ -5086,27 +5422,35 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
             source = futures[future]
             
             if df is None or df.empty:
-                # print(f"Warning: No data from {source}!")
-                continue  # Skip empty DataFrames
+                continue
             
-            # print(f"Data from {source} retrieved successfully.")
-            df['source'] = source  # Add source column
-            
-            # Process the data for consistency
+            df['source'] = source
             processed_df = getWeatherForGeoid(df, geoid)
             dataframes.append(processed_df)
 
     if not dataframes:
         print("No data available from any source.")
-        return pd.DataFrame()  # Return an empty DataFrame
+        return pd.DataFrame()
+    
+    expected_columns = ['Date', 'Tavg', 'Wavg', 'RNet', 'ETo__in']
 
-    # Merge DataFrames while aligning columns
+    for i, df in enumerate(dataframes):
+        for col in expected_columns:
+            if col not in df.columns:
+                dataframes[i][col] = pd.NA
+        dataframes[i] = df[expected_columns]
+
     merged_df = pd.concat(dataframes, ignore_index=True, sort=False)
+    
+    # Group by Date and aggregate to combine rows
+    merged_df = merged_df.groupby('Date', as_index=False).first()
+    
+    merged_df = merged_df.fillna(0)
 
     # Ensure Date is properly formatted
     if {'Year', 'Month', 'Day'}.issubset(merged_df.columns):
         merged_df['Date'] = pd.to_datetime(merged_df[['Year', 'Month', 'Day']], errors='coerce')
-    
+
     # Rename 'Date' to 'date' for consistency
     if 'Date' in merged_df.columns:
         merged_df.rename(columns={'Date': 'date'}, inplace=True)
@@ -5114,14 +5458,15 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
     # Ensure 'date' is a datetime object
     merged_df['date'] = pd.to_datetime(merged_df['date'], errors='coerce')
 
-    # Remove duplicate rows and fill missing values forward
+    # Check and handle array-like columns before dropping duplicates
+    for col in merged_df.columns:
+        if merged_df[col].apply(lambda x: isinstance(x, np.ndarray)).any():
+            merged_df[col] = merged_df[col].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
+
     merged_df.drop_duplicates(inplace=True)
     merged_df.fillna(method='ffill', inplace=True)
-    
-    if 'Date' in merged_df.columns:
-        merged_df.rename(columns={'Date': 'date'}, inplace=True)
 
-    # Ensure 'date' is a datetime object
+    # Ensure 'date' is a datetime object after any further processing
     merged_df['date'] = pd.to_datetime(merged_df['date'])
 
     # Extract time component and create an hour column
@@ -5137,6 +5482,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
 
     return result
+
 
 
 
@@ -6244,8 +6590,6 @@ def getWeatherfunc():
 
     # Get weather data
     weather_data = getWeatherForDates(geoid, start_date, end_date)
-    
-    print(weather_data)
 
     # Handle NaT values in the DataFrame
     if isinstance(weather_data, pd.DataFrame):
@@ -6362,4 +6706,3 @@ def getNDVI():
         #print('Invalid Polygon')
         return 'Invalid Polygon'
 """
-
