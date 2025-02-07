@@ -66,6 +66,7 @@ import pytz
 from datetime import timedelta
 from collections import Counter
 from shapely.geometry import Polygon as ShapelyPolygon
+# import et
 
 
 warnings.filterwarnings('ignore')
@@ -1756,7 +1757,7 @@ def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
                     
                     # Check if the DataFrame is empty
                     if satelite_df.empty:
-                        print(f"No data available for date {date}.")
+                        # print(f"No data available for date {date}.")
                         satellite_result[date] = [{'average_stats': None}]
                         continue  # Skip to the next date
 
@@ -2587,7 +2588,30 @@ def get_eto_data_description():
     }
     return metadata_eto_description
 
+def et_metadata():
+    metadata = {
+        "Date": "datetime (UTC)", 
+        "ETo__in": "inches", 
+        "Tavg": "K", 
+        "Wavg": "m/s",
+        "NDVI": "dimensionless",
+        "90th_prctile": "dimensionless"
+    }
+    
+    return metadata
 
+def et_data_description():
+    metadata_desc = {
+        "Date": "Timestamp in Coordinated Universal Time (UTC).",
+        "90th_prctile": "90th percentile value of NDVI data",
+        "NDVI": "Normalized Difference Vegetation Index, indicating vegetation health",
+        "ETo__in": "Average Evapotranspiration (in inches).", 
+        "Tavg": "Mean Air Temperature at 2 meters above ground.", 
+        "Wavg": "Wind Run (in m/s), the total distance the wind has traveled."
+
+    }
+
+    return metadata_desc
 def get_satelite_stats_metadata():
 
     metadata = {
@@ -3888,7 +3912,6 @@ def getWeatherFromAUS(agstack_geoid, dtStr,end_date=None):
 
         # if not weather_df.empty:
         #     weather_df.dropna(inplace=True)
-        print(aus_weather_df.columns)
         w_all = pd.concat([w_all, aus_weather_df], ignore_index=True)
     if len(w_all) > 0:
         w_all = w_all.fillna(0)
@@ -4305,7 +4328,6 @@ def getWeatherFromSatelite(agstack_geoid, start_date, end_date=None):
     except Exception as e:
         print(e)
         w_ret = pd.DataFrame()
-    print(w_ret)
     return w_ret
 
 
@@ -4389,7 +4411,7 @@ def get_all_available_dates(filePath):
                 # Extract the date from the directory name
                 date_str = dir_name.split("YY_MM_DD=")[-1]
                 available_dates.append(date_str)
-    print(f'available_dates--{available_dates}')
+    # print(f'available_dates--{available_dates}')
     
     return available_dates
 
@@ -4481,9 +4503,9 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
     # Get the list of S2 indices
     try:
         s2_index_L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
-        print(f's2_index_L8_list--{s2_index_L8_list}')
+        # print(f's2_index_L8_list--{s2_index_L8_list}')
         s2_index_L10_list, _ = get_s2_cellids_and_token_list(10, [lat], [lon])
-        print(f's2_index_L10_list--{s2_index_L10_list}')
+        # print(f's2_index_L10_list--{s2_index_L10_list}')
 
         list_of_L8_paths = [
             os.path.join(pa_filePath, f's2_index__L8={x}')
@@ -4496,7 +4518,7 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
             if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
         ]
 
-        print(f'list_of_L10_paths--{list_of_L10_paths}')
+        # print(f'list_of_L10_paths--{list_of_L10_paths}')
         
         if not list_of_L10_paths:
             print("No paths found.")
@@ -4511,12 +4533,12 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
     try:
         available_dates = get_all_available_dates(list_of_L10_paths[0])
         date_counts = Counter(available_dates)
-        print(f'Date counts: {date_counts}')
+        # print(f'Date counts: {date_counts}')
         
         if start_date_str not in available_dates:
-            print(f"No data available for {start_date_str}. Checking for the closest historical date...")
+            # print(f"No data available for {start_date_str}. Checking for the closest historical date...")
             closest_date_str = get_closest_historical_date(available_dates, utc_start_dt)
-            print(f'closest_date_str--{closest_date_str}')
+            # print(f'closest_date_str--{closest_date_str}')
             if not closest_date_str:
                 print("No historical data available.")
                 return empty_result()
@@ -4548,7 +4570,7 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
                     
                     # Check if the DataFrame is empty
                     if satelite_df.empty:
-                        print(f"No data available for date {date}.")
+                        # print(f"No data available for date {date}.")
                         satellite_result[date] = [{'average_stats': None}]
                         continue  # Skip to the next date
 
@@ -5099,7 +5121,7 @@ REGION_CONFIG = {
     }
 }
 
-def getRNet(rad_df):
+def getRnet(rad_df):
     """
     Must have the following columns and units:
     expected_units: {
@@ -5127,14 +5149,14 @@ def getRNet(rad_df):
     LW_D_df = rad_df.loc[:,'LW_D']
     LW_U_df = rad_df.loc[:,'LW_U']
     
-    rad_df['RNet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
-    return pd.DataFrame(rad_df.loc[:,'RNet'])
+    rad_df['Rnet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
+    return pd.DataFrame(rad_df.loc[:,'Rnet'])
 
 def getWeatherForGeoid(df, agstack_geoid):
     """Process weather data with the specified data flow"""
     region = getRegion(agstack_geoid)
     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     
     if df.empty:
         return pd.DataFrame(columns=required_columns + ['Date'])
@@ -5202,16 +5224,16 @@ def getWeatherForGeoid(df, agstack_geoid):
             for items in source_records:
                 # Check source type and assign values accordingly
                 # if items['source'] == 'NCEP':
-                #     if 'RNet' in items:
-                #         resultDict['RNet'] = items['RNet']
+                #     if 'Rnet' in items:
+                #         resultDict['Rnet'] = items['Rnet']
                 if items['source'] == 'NOAA':
                     if 'Tavg' in items:
                         resultDict['Tavg'] = items['Tavg']
                 elif items['source'] == 'NOAA-FORECAST':
                     if 'Wavg' in items:
                         resultDict['Wavg'] = items['Wavg']
-                    if 'RNet' in items:
-                        resultDict['RNet'] = items['RNet']
+                    if 'Rnet' in items:
+                        resultDict['Rnet'] = items['Rnet']
                 elif items['source'] == 'GHCND':
                     if 'ETo__in' in items:
                         resultDict['ETo__in'] = items['ETo__in']
@@ -5227,8 +5249,8 @@ def getWeatherForGeoid(df, agstack_geoid):
                         resultDict['Wavg'] = items['Wavg']
                         resultDict['Tavg'] = items['Tavg']
                 elif items['source'] == 'AUS-FORECASTED':
-                    if 'RNet' in items:
-                        resultDict['RNet'] = items['RNet']
+                    if 'Rnet' in items:
+                        resultDict['Rnet'] = items['Rnet']
                 if 'Date' in items:
                     resultDict['Date'] = items['Date']
                       
@@ -5268,26 +5290,26 @@ def process_aus(source_df, source):
         aus_df['Tavg'] = source_df['T_mean'] + 273.15  # Convert to Kelvin
 
     elif source == 'AUS-FORECASTED':
-        aus_df_forecast_df['RNet'] = source_df['R_n__MJpm2']
+        aus_df_forecast_df['Rnet'] = source_df['R_n__MJpm2']
        
     # Join all dataframes (adjust if you need to join based on specific keys)
     df_final = source_df.join([aus_df, aus_df_forecast_df])
     
     # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     available_columns = [col for col in required_columns if col in df_final.columns]
     return df_final
 
 def process_ncep(source_df):
     """Process NCEP source data"""
-    required_ncep_columns = ['RNet']
+    required_ncep_columns = ['Rnet']
     df = source_df.copy()
     # Check for missing columns first
     missing = [col for col in required_ncep_columns if col not in df.columns]
-    if missing and 'RNet' not in missing:  # Allow R_net since we generate it
+    if missing and 'Rnet' not in missing:  # Allow R_net since we generate it
         raise ValueError(f"Missing NCEP columns: {missing}")
     # Generate R_net
-    df['RNet'] = getRNet(df)
+    df['Rnet'] = getRnet(df)
 
     return df
 
@@ -5324,16 +5346,16 @@ def process_cimis_noaa(source_df):
     if wind_values:
         source_df['Wavg'] = sum(wind_values) / len(wind_values)
     
-    rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
+    Rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
     if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
-        ncep_rnet = getRNet(df)
-        # ncep_rnet = ncep_source_df['R_net']
+        ncep_Rnet = getRnet(source_df)
+        # ncep_Rnet = ncep_source_df['R_net']
         
         # Compute WindRun average
-    r_net_values = [w for w in [rnet_cimis, ncep_rnet] if w is not None]
+    r_net_values = [w for w in [Rnet_cimis, ncep_Rnet] if w is not None]
 
     if wind_values:
-        source_df['RNet'] = sum(r_net_values) / len(r_net_values)
+        source_df['Rnet'] = sum(r_net_values) / len(r_net_values)
     
     return source_df
 
@@ -5359,13 +5381,13 @@ def process_noaa_ghcnd(source_df, source):
     # Process for NOAA-FORECAST source
     if source == 'NOAA-FORECAST':
         noaa_forecast_df['Wavg'] = df['U_z']
-        noaa_forecast_df['RNet'] = df['R_n__MJpm2']
+        noaa_forecast_df['Rnet'] = df['R_n__MJpm2']
     
     # Join all dataframes (adjust if you need to join based on specific keys)
     df_final = source_df.join([ghcnd_df, noaa_df, noaa_forecast_df])
     
     # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     available_columns = [col for col in required_columns if col in df_final.columns]
     
     return df_final
@@ -5383,7 +5405,7 @@ def process_other_region(source_df,source):
         tavg_ghcnd = source_df['T_mean']
     if source == 'NCEP' or source == 'NLDAS':
         tavg_ncep = source_df['T_mean']
-        ncep_df['RNet'] = getRnet(source_df)
+        ncep_df['Rnet'] = getRnet(source_df)
         
     tavg_values = [t for t in [tavg_ghcnd, tavg_ncep] if t is not None]
     if tavg_values:
@@ -5393,7 +5415,7 @@ def process_other_region(source_df,source):
     df_final = source_df.join([ghcnd_df, ncep_df])
     
     # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'RNet']
+    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     available_columns = [col for col in required_columns if col in df_final.columns]
         
     return df_final
@@ -5432,7 +5454,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         print("No data available from any source.")
         return pd.DataFrame()
     
-    expected_columns = ['Date', 'Tavg', 'Wavg', 'RNet', 'ETo__in']
+    expected_columns = ['Date', 'Tavg', 'Wavg', 'Rnet', 'ETo__in']
 
     for i, df in enumerate(dataframes):
         for col in expected_columns:
@@ -5478,11 +5500,82 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         date_str = str(date)
         if date_str not in result:
             result[date_str] = []
-        # Add hourly data as a dictionary
-        result[date_str].append(group.drop(columns=['date']).to_dict(orient='records')[0])
+        # Add hourly data as a dictionary but drop the 'hour' column before adding
+        result[date_str].append(group.drop(columns=['date', 'hour']).to_dict(orient='records')[0])
 
     return result
 
+def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
+    response_dict = {}
+
+    weatherETc_dict = getWeatherForDates(geoid, start_date, end_date)
+    satelite_dict = getWeatherFromSatelite(geoid, start_date, end_date)
+    satellie_stats_dict = getSateliteStatsFn(geoid, start_date, end_date)
+
+    # Process weather data
+    for key, val in weatherETc_dict.items():
+        if isinstance(val, list):
+            for item in val:
+                response_dict[key] = {
+                    'ETo__in': item.get('ETo__in'),
+                    'Rnet': item.get('Rnet'),
+                    'Tavg': item.get('Tavg'),
+                    'Wavg': item.get('Wavg'),
+                }
+        elif isinstance(val, dict):
+            response_dict[key] = {
+                'ETo__in': val.get('ETo__in'),
+                'Rnet': val.get('Rnet'),
+                'Tavg': val.get('Tavg'),
+                'Wavg': val.get('Wavg'),
+            }
+
+    # Merge satellite stats into the corresponding entries
+    for key, val in satellie_stats_dict.items():
+        if key in response_dict:
+            if isinstance(val, list):
+                for item in val:
+                    response_dict[key]['90th_prctile'] = item.get('90th_prctile')
+            elif isinstance(val, dict):
+                response_dict[key]['90th_prctile'] = val.get('90th_prctile')
+
+    # Merge satellite data into the corresponding entries
+    for key, val in satelite_dict.items():
+        if key in response_dict:
+            if isinstance(val, list):
+                for item in val:
+                    response_dict[key]['NDVI'] = item.get('NDVI')
+            elif isinstance(val, dict):
+                response_dict[key]['NDVI'] = val.get('NDVI')
+
+    return response_dict
+  
+import psycopg2
+
+DB_CONFIG = {
+    "dbname": "terrapipe_backend",
+    "user": "tp_admin",
+    "password": "tp_admin@1234",
+    "host": "localhost",
+    "port": 5432
+}
+
+def getActiveScopes():
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+
+    # Execute the query to fetch scope_name and available_dates
+    cur.execute("SELECT scope_name, available_dates FROM scopes;")
+    rows = cur.fetchall()
+
+    # Format the results as a list of dictionaries
+    active_scopes = [{row[0]: sorted(row[1])} for row in rows]
+
+    # Close the connection
+    cur.close()
+    conn.close()
+
+    return active_scopes
 
 
 
@@ -6369,6 +6462,21 @@ def getEtoFromWeather():
     
     return jsonify(response)
 
+@app.route('/getET')
+def getEtFn():
+    agstack_geoid = request.args['geoid']
+    start_date = request.args['start_date']
+    end_date = request.args.get('end_date', None)
+    
+    json_data = getETFn(agstack_geoid , start_date , end_date)
+
+    response = {
+        'data': json_data,
+        'metadata':eto_metadata(),
+        'metadata-description':get_eto_data_description()
+        }
+    return response
+    
 @app.route('/getEtcEto')
 def getEtoFromWeatherEtc():
     agstack_geoid = request.args['geoid']
@@ -6381,11 +6489,11 @@ def getEtoFromWeatherEtc():
     # json_data = avg_eto__df.to_dict(orient='records')
     # Return the average ETo value in the response
     response = {
-                'data': json_data,
-                'metadata':eto_metadata(),
-                'metadata-description':get_eto_data_description()
+        'data': json_data,
+        'metadata':et_metadata(),
+        'metadata-description':et_data_description()
                 
-                }
+        }
     
     return jsonify(response)
 
@@ -6605,7 +6713,14 @@ def getWeatherfunc():
     return jsonify(response)
 
 
+@app.route('/getActiveScopes')
+def getActiveScopes_NDVI():
+    result = getActiveScopes()
 
+    if "error" in result:
+        return jsonify(result), 500
+
+    return jsonify(result), 200
     
 
 # @app.route('/regField')
