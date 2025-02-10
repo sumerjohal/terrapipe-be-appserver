@@ -66,7 +66,7 @@ import pytz
 from datetime import timedelta
 from collections import Counter
 from shapely.geometry import Polygon as ShapelyPolygon
-# import et
+import et
 
 
 warnings.filterwarnings('ignore')
@@ -1312,56 +1312,44 @@ def getNDVIgdfFromGeoid(agstack_geoid, dt_str):
 
     return clipped_ndvi_gdf, boundary_gdf
 
-def getNDVIgdfFromGeoidEtc(agstack_geoid, StartDtStr, N):
+def getNDVIgdfFromGeoidEtc(agstack_geoid, end_date_str, N):
     """
-    Fetch NDVI data and geometries for a given geoid and date, then create a GeoDataFrame.
-    Returns a GeoDataFrame with NDVI values between 0 and 1, or NaN if out of range.
+    Fetch NDVI data and geometries for a given geoid and end date.
+    Returns a GeoDataFrame with NDVI values between 0 and 1.
     
     Parameters:
     - agstack_geoid: The geoid (polygon boundary) for the region of interest.
-    - endDtStr: The end date string (e.g., "2025-01-22").
-    - N: The number of days before the end date to determine the start date.
+    - end_date_str: The end date string (e.g., "2025-01-22").
+    - N: The number of days before the end date to include in the data retrieval.
     
     Returns:
-    - A GeoDataFrame with NDVI values for the date N days before the `endDtStr`, clipped to the boundary geometry.
+    - A GeoDataFrame with NDVI values for the N days before the end date.
     """
-    # Clean the endDtStr to remove any additional parameters (e.g., ",N=7")
-    
-    StartDtStr = StartDtStr.split(',')[0]  # Remove extra parameters
-
-    # Debug: Print the value of N
-    print(f"Value of N: {N}")
-
-    # Check if N is being passed correctly
-    if not isinstance(N, int) or N <= 0:
-        raise ValueError(f"Invalid value for N: {N}. N must be a positive integer.")
-
-    # Convert end date string to datetime object
     try:
-        start_dt = datetime.strptime(StartDtStr, '%Y-%m-%d')
-    except ValueError as e:
-        raise ValueError(f"Error parsing endDtStr: {endDtStr}. Ensure it is in 'YYYY-MM-DD' format.") from e
-
-    # Calculate start date by subtracting N days from the end date
-    end_dt = start_dt - timedelta(days=N)
-
-    # Convert the start date back to string format
-    endDtStr = end_dt.strftime('%Y-%m-%d')
-
-    # Print start and end dates for debugging
-    print(f"Start date: {StartDtStr}, End date: {endDtStr}")
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError(f"Invalid date format: {end_date_str}. Use 'YYYY-MM-DD' format.")
     
+    if N <= 0:
+        raise ValueError("N must be a positive integer.")
+
+    start_date = end_date - timedelta(days=N)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+
     # Fetch S2 tokens and geometries
     s2_tokens_gdf, boundary_gdf = polygon_to_s2_tokens(agstack_geoid, 19)
-    print(s2_tokens_gdf)
+    
 
-    # Perform spatial join to filter intersecting polygons
     intersecting_s19 = gpd.sjoin(s2_tokens_gdf, boundary_gdf, how="inner", predicate="intersects")
+    print(intersecting_s19)
 
-    # Extract unique S2 indices and geometries
+   # Extract unique S2 indices and geometries
     L8_token_list = set(intersecting_s19['s2_index__L8'])
     L10_token_list = set(intersecting_s19['s2_index__L10'])
     L19_token_list = set(intersecting_s19['s2_index__L19'])
+    print(L8_token_list)
+    print(L10_token_list)
+    print(L19_token_list)
     geometry = intersecting_s19[['s2_index__L19', 'geometry']].drop_duplicates()
 
     ndvi_img_gdf = pd.DataFrame()
@@ -1380,62 +1368,69 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, StartDtStr, N):
         for x in L10_token_list
         if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
     }
-
+    
     print(list_of_L10_paths)
-
+    
     if not list_of_L10_paths:
-        # Return empty GeoDataFrame and boundary_gdf if no paths are found
-        return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf
+        return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf , None
 
-    # Load weather datasets
-    weather_datasets = [
-        ds.dataset(path, format="parquet", partitioning="hive")
-        for path in list_of_L10_paths
-    ]
+    weather_datasets = [ds.dataset(path, format="parquet", partitioning="hive") for path in list_of_L10_paths]
+    available_dates = []
+    ndvi_img_gdf = gpd.GeoDataFrame()
 
+    # Check for the most recent available date
     for weather_dataset in weather_datasets:
-        print(f"Filtering NDVI data from {StartDtStr} to {endDtStr}")
+        date_table = weather_dataset.to_table(columns=['YY_MM_DD']).to_pandas()
+        date_table['YY_MM_DD'] = pd.to_datetime(date_table['YY_MM_DD'])
 
-        # Filter data for the date range
+        # Filter dates within the range
+        valid_dates = date_table[
+            (date_table['YY_MM_DD'] >= start_date) &
+            (date_table['YY_MM_DD'] <= end_date)
+        ]['YY_MM_DD'].unique()
+
+        available_dates.extend(valid_dates)
+    if not available_dates:
+        print("No data available in the specified range.")
+        return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf, None
+
+
+    if not available_dates:
+        print("No data available in the specified range.")
+        return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf , None
+
+    # Find the most recent date with data
+    most_recent_date = max(available_dates)
+    most_recent_date_str = most_recent_date.strftime('%Y-%m-%d')
+    
+    for weather_dataset in weather_datasets:
         filtered_table = weather_dataset.to_table(
             columns=['s2_index__L19', 'NDVI', 'YY_MM_DD'],
-            filter=(
-                (ds.field('YY_MM_DD') >= endDtStr) &
-                (ds.field('YY_MM_DD') <= StartDtStr)
-            )
+            filter=(ds.field('YY_MM_DD') == most_recent_date_str)
         ).to_pandas()
-
-        print(filtered_table)
-        # Filter rows with valid S2 tokens in L10
+        
+        
         intersected_L19_filtered_table = filtered_table[filtered_table['s2_index__L19'].isin(L19_token_list)]
         
-
-        # Ensure no duplicate S2 tokens and calculate average NDVI
         aggregated_df = (
             intersected_L19_filtered_table
             .drop_duplicates(subset='s2_index__L19', keep='first')
             .groupby('s2_index__L19', as_index=False)['NDVI']
             .mean()
         )
-
-        # Clip NDVI values to range [0, 1]
+        
         aggregated_df['NDVI'] = aggregated_df['NDVI'].apply(lambda x: np.nan if x < 0 or x > 1 else x)
 
-        # Merge NDVI data with geometry based on S2 token
         merged_gdf = pd.merge(aggregated_df, geometry, on='s2_index__L19', how='inner')
-        
-        # Convert to GeoDataFrame
+
         ndvi_img_gdf = gpd.GeoDataFrame(merged_gdf, geometry='geometry', crs="EPSG:4326")
         ndvi_img_gdf = ndvi_img_gdf.drop(columns=['s2_index__L19'])
-        
-        # Ensure both GeoDataFrames are in the same CRS
+
         ndvi_img_gdf = ndvi_img_gdf.to_crs(epsg=4326)
         boundary_gdf = boundary_gdf.to_crs(epsg=4326)
 
-        # Clip the ndvi_gdf with the boundary_gdf
         clipped_ndvi_gdf = gpd.clip(ndvi_img_gdf, boundary_gdf)
-
-    return clipped_ndvi_gdf, boundary_gdf
+    return clipped_ndvi_gdf, boundary_gdf  ,most_recent_date_str
 
 
 def getTMFgdfFromGeoid(agstack_geoid):
@@ -1636,7 +1631,6 @@ def calculate_stats_etc(weather_df):
     Calculate required statistics for a given weather_df.
     """
     if 'NDVI' not in weather_df.columns:
-        print("NDVI column not found in the DataFrame.")
         return None
 
     # Filter NDVI values to keep only valid range
@@ -1690,9 +1684,7 @@ def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
     # Get the list of S2 indices
     try:
         s2_index_L8_list, _ = get_s2_cellids_and_token_list(8, [lat], [lon])
-        print(f's2_index_L8_list--{s2_index_L8_list}')
         s2_index_L10_list, _ = get_s2_cellids_and_token_list(10, [lat], [lon])
-        print(f's2_index_L10_list--{s2_index_L10_list}')
 
         list_of_L8_paths = [
             os.path.join(pa_filePath, f's2_index__L8={x}')
@@ -1704,9 +1696,6 @@ def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
             for x in s2_index_L10_list
             if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
         ]
-
-        print(f'list_of_L10_paths--{list_of_L10_paths}')
-        
         if not list_of_L10_paths:
             print("No paths found.")
             return empty_result()
@@ -1720,14 +1709,10 @@ def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
     try:
         available_dates = get_all_available_dates(list_of_L10_paths[0])
         date_counts = Counter(available_dates)
-        print(f'Date counts: {date_counts}')
         
         if start_date_str not in available_dates:
-            print(f"No data available for {start_date_str}. Checking for the closest historical date...")
             closest_date_str = get_closest_historical_date(available_dates, utc_start_dt)
-            print(f'closest_date_str--{closest_date_str}')
             if not closest_date_str:
-                print("No historical data available.")
                 return empty_result()
         else:
             closest_date_str = start_date_str
@@ -1844,8 +1829,6 @@ def getSateliteStatsFnETC(agstack_geoid, start_date, end_date=None):
         stats_list = s_all.to_dict(orient='records')
         final_result[start_date_str] = stats_list
         return final_result
-
-
 
 # def getNDVIgdfFromGeoid(agstack_geoid, start_date,end_date):
 #     # Fetch WKT polygon and extract lat, lon
@@ -4465,10 +4448,12 @@ def calculate_stats(weather_df):
     return pd.Series(stats)
 
 
-# Define an empty result structure
 def empty_result():
-    columns = ["Date", "NDVI", "min", "max", "median","stddev","5th_prctile","10th_prctile","25th_prctile","75th_prctile","90th_prctile","95th_prctile"]  # Adjust with the actual column names
-    return pd.DataFrame(columns=columns).fillna("")
+    columns = ["Date", "NDVI", "min", "max", "median", "stddev", 
+               "5th_prctile", "10th_prctile", "25th_prctile", 
+               "75th_prctile", "90th_prctile", "95th_prctile"]
+    df = pd.DataFrame(columns=columns).fillna("")
+    return df.to_dict(orient='records')  # Converts DataFrame to list of dicts
 
 def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
     filePath = "/network/SENTINEL/PARQUET_NDVI_L20/"
@@ -4591,70 +4576,71 @@ def getSateliteStatsFn(agstack_geoid, start_date, end_date=None):
     except Exception as e:
         print(f"Error setting up weather datasets: {e}")
         return empty_result()
+    try:
+        
+        # Combine all stats into a single DataFrame
+        if stats_list:
+            try:
+                s_all = pd.DataFrame(stats_list)
+                s_all = s_all.dropna()
+            except Exception as e:
+                print(f"Error combining statistics: {e}")
+                return empty_result()
+        else:
+            print("No statistics calculated.")
+            return satellite_result
 
-    # Combine all stats into a single DataFrame
-    if stats_list:
-        try:
-            s_all = pd.DataFrame(stats_list)
-            s_all = s_all.dropna()
-        except Exception as e:
-            print(f"Error combining statistics: {e}")
-            return empty_result()
-    else:
-        print("No statistics calculated.")
-        return satellite_result
+        # Process based on the number of unique dates
+        if len(date_range) > 1:
+            # Process for multiple dates
+            s_all.set_index('date', inplace=True)
 
-    # Process based on the number of unique dates
-    if len(date_range) > 1:
-        # Process for multiple dates
-        s_all.set_index('date', inplace=True)
+            if s_all.index.tz is None:
+                s_all.index = s_all.index.tz_localize('UTC')
 
-        if s_all.index.tz is None:
-            s_all.index = s_all.index.tz_localize('UTC')
+            try:
+                duplicates = s_all.index[s_all.index.duplicated()]
+                if not duplicates.empty:
+                    print("Duplicate index labels found:", duplicates)
+                s_all = s_all[~s_all.index.duplicated(keep='first')]
+                s_all.index = pd.to_datetime(s_all.index)
 
-        try:
-            duplicates = s_all.index[s_all.index.duplicated()]
-            if not duplicates.empty:
-                print("Duplicate index labels found:", duplicates)
-            s_all = s_all[~s_all.index.duplicated(keep='first')]
-            s_all.index = pd.to_datetime(s_all.index)
+            except Exception as e:
+                print(f'error -{e}')
 
-        except Exception as e:
-            print(f'error -{e}')
-
-        s_resampled = s_all.resample('D').interpolate(method='linear')
-        s_resampled.reset_index(inplace=True)
-
-        last_date = s_resampled['date'].iloc[-1]
-        if last_date < utc_end_dt:
-            new_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), end=utc_end_dt, freq='D')
-            new_rows = pd.DataFrame({'date': new_dates})
-            s_resampled = pd.concat([s_resampled, new_rows], axis=0)
-            s_resampled.set_index('date', inplace=True)
-            s_resampled = s_resampled.interpolate(method='linear')
+            s_resampled = s_all.resample('D').interpolate(method='linear')
             s_resampled.reset_index(inplace=True)
 
-        s_resampled = s_resampled[(s_resampled['date'].dt.date >= utc_start_dt.date()) & (s_resampled['date'].dt.date <= utc_end_dt.date())]
+            last_date = s_resampled['date'].iloc[-1]
+            if last_date < utc_end_dt:
+                new_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), end=utc_end_dt, freq='D')
+                new_rows = pd.DataFrame({'date': new_dates})
+                s_resampled = pd.concat([s_resampled, new_rows], axis=0)
+                s_resampled.set_index('date', inplace=True)
+                s_resampled = s_resampled.interpolate(method='linear')
+                s_resampled.reset_index(inplace=True)
 
-        # Convert to JSON format
-        final_result = {}
-        for date, group in s_resampled.groupby(s_resampled['date'].dt.date):
-            stats_list = group.to_dict(orient='records')
-            final_result[date.strftime('%Y-%m-%d')] = stats_list
+            s_resampled = s_resampled[(s_resampled['date'].dt.date >= utc_start_dt.date()) & (s_resampled['date'].dt.date <= utc_end_dt.date())]
 
-        return final_result
-    else:
-        # Process for a single date
-        final_result = {}
-        stats_list = s_all.to_dict(orient='records')
-        final_result[start_date_str] = stats_list
-        return final_result
+            # Convert to JSON format
+            final_result = {}
+            for date, group in s_resampled.groupby(s_resampled['date'].dt.date):
+                stats_list = group.to_dict(orient='records')
+                final_result[date.strftime('%Y-%m-%d')] = stats_list
+
+            return final_result
+        else:
+            # Process for a single date
+            final_result = {}
+            stats_list = s_all.to_dict(orient='records')
+            final_result[start_date_str] = stats_list
+            return final_result
+            
+    except Exception as e:
+        print(e)
         
+        return pd.DataFrame()
 
-
-
-
-# AUS_FORECASTED
 # AUS_FORECASTED
 def getWeatherFromAUSFORECASTED(agstack_geoid, start_date, end_date=None):
     # File path for the data
@@ -5167,6 +5153,8 @@ def getWeatherForGeoid(df, agstack_geoid):
     except:
         df['Date'] = df['TS']
     
+    # Drop duplicate dates    
+    df = df.drop_duplicates(subset='Date')
     start_date = df['Date'].min()
     end_date = df['Date'].max()
     full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
@@ -5509,19 +5497,20 @@ def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
     response_dict = {}
 
     weatherETc_dict = getWeatherForDates(geoid, start_date, end_date)
-    satelite_dict = getWeatherFromSatelite(geoid, start_date, end_date)
+    satelite_df = getWeatherFromSatelite(geoid, start_date, end_date)
     satellie_stats_dict = getSateliteStatsFn(geoid, start_date, end_date)
-
+    
     # Process weather data
     for key, val in weatherETc_dict.items():
         if isinstance(val, list):
             for item in val:
-                response_dict[key] = {
+                response_dict[key] = {  # This overwrites previous entries
                     'ETo__in': item.get('ETo__in'),
                     'Rnet': item.get('Rnet'),
                     'Tavg': item.get('Tavg'),
                     'Wavg': item.get('Wavg'),
                 }
+
         elif isinstance(val, dict):
             response_dict[key] = {
                 'ETo__in': val.get('ETo__in'),
@@ -5540,15 +5529,35 @@ def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
                 response_dict[key]['90th_prctile'] = val.get('90th_prctile')
 
     # Merge satellite data into the corresponding entries
-    for key, val in satelite_dict.items():
-        if key in response_dict:
-            if isinstance(val, list):
-                for item in val:
-                    response_dict[key]['NDVI'] = item.get('NDVI')
-            elif isinstance(val, dict):
-                response_dict[key]['NDVI'] = val.get('NDVI')
+    satelite_df['Date'] = pd.to_datetime(satelite_df['UTC_DATETIME']).dt.strftime('%Y-%m-%d')
+    # Convert DataFrame to dictionary
+    satelite_dict_converted = satelite_df.to_dict('index')  # Converts with index as keys
+    for _, val in satelite_dict_converted.items():
+        date = val.get('Date')
+        ndvi_value = val.get('NDVI')
+        
+        if date in response_dict:
+            response_dict[date]['NDVI'] = ndvi_value
 
-    return response_dict
+                    
+    final_df = pd.DataFrame(response_dict)
+    # Convert to DataFrame
+    final_df = pd.DataFrame.from_dict(response_dict, orient='index')
+    final_df.index.name = 'Date'  # Ensure 'Date' is the index
+    # print(final_df.isnull().sum())
+    # print(final_df.dtypes)
+    # print(f"Weather dates: {weatherETc_dict.keys()}")
+    # print(f"Satellite dates: {satelite_dict['Date'].unique()}")
+    # print(f"Satellite stats dates: {satellie_stats_dict.keys()}")
+    # print(f"Satellite stats data: {satellie_stats_dict}")
+# 
+    # Pass to generateET from et.so
+    et_result_df = et.generateET(final_df)
+    # print(et.generateET(final_df) ) #for testing. 
+
+    # Return the DataFrame with 'Date' as index and 'ETa__in' column
+    return et_result_df[['ETa__in']].to_json(orient='index')
+
   
 import psycopg2
 
@@ -6584,20 +6593,20 @@ def getNDVIImgEtc():
     """
     Endpoint to fetch the NDVI image and boundary GeoJSON data for a given geoid and date.
     """
-    date = request.args.get('date')
+    end_date = request.args.get('date')
     agstack_geoid = request.args.get('geoid', '')
     N = request.args.get('N')
     
     N = int(N)  # ensure it's converted to an integer
     
     # Assuming `getNDVIgdfFromGeoidEtc` is the updated function
-    final_res_gdf, bound_gdf = getNDVIgdfFromGeoidEtc(agstack_geoid, date, N)
+    clipped_ndvi_gdf, boundary_gdf  ,most_recent_date_str = getNDVIgdfFromGeoidEtc(agstack_geoid, end_date, N)
     
     # Convert GeoDataFrames to GeoJSON
     imgDict = {
-        'date': date,
-        'ndvi_img': json.loads(final_res_gdf.to_json()),  # Convert GeoDataFrame to GeoJSON object
-        'boundary_geoDataFrameDict': json.loads(bound_gdf.to_json()),  # Convert boundary GeoDataFrame to GeoJSON object
+        'date': most_recent_date_str,
+        'ndvi_img': json.loads(clipped_ndvi_gdf.to_json()),  # Convert GeoDataFrame to GeoJSON object
+        'boundary_geoDataFrameDict': json.loads(boundary_gdf.to_json()),  # Convert boundary GeoDataFrame to GeoJSON object
         'metadata': get_ndvi_metadata(),  # Call metadata function
         'metadata-description': get_ndvi_metadata_description()  # Call metadata description function
     }
