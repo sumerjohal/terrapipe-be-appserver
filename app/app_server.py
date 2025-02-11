@@ -4917,6 +4917,26 @@ def get_tmf_metadata_description():
     return metadata_tmf_description
 
 
+# ETA
+def getETA_metadata():
+    metadata= {
+        "date": "datetime (UTC)",
+        "ETa__in": "float (inches/day)",
+        "ETa90th__in": "float (inches/day)"
+        }
+    return metadata
+
+# metadata Description
+def getETA_description():
+    
+    metadata_description = {
+        "date": "Date and time of data capture in UTC format",
+        "ETa__in": "Average actual evapotranspiration (ETa) in inches per day, representing the rate of water loss through evaporation and transpiration from the surface.",
+        "ETa90th__in": "90th percentile value of NDVI data"
+    }
+    
+    return metadata_description
+
 # JRC
 def getWeatherFromJRC(agstack_geoid):
     filePath = "/network/TMF_UAD/"
@@ -5497,7 +5517,6 @@ def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
     response_dict = {}
 
     weatherETc_dict = getWeatherForDates(geoid, start_date, end_date)
-    satelite_df = getWeatherFromSatelite(geoid, start_date, end_date)
     satellie_stats_dict = getSateliteStatsFn(geoid, start_date, end_date)
     
     # Process weather data
@@ -5525,38 +5544,19 @@ def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
             if isinstance(val, list):
                 for item in val:
                     response_dict[key]['90th_prctile'] = item.get('90th_prctile')
+                    response_dict[key]['NDVI'] = item.get('avg')
             elif isinstance(val, dict):
                 response_dict[key]['90th_prctile'] = val.get('90th_prctile')
-
-    # Merge satellite data into the corresponding entries
-    satelite_df['Date'] = pd.to_datetime(satelite_df['UTC_DATETIME']).dt.strftime('%Y-%m-%d')
-    # Convert DataFrame to dictionary
-    satelite_dict_converted = satelite_df.to_dict('index')  # Converts with index as keys
-    for _, val in satelite_dict_converted.items():
-        date = val.get('Date')
-        ndvi_value = val.get('NDVI')
-        
-        if date in response_dict:
-            response_dict[date]['NDVI'] = ndvi_value
-
                     
     final_df = pd.DataFrame(response_dict)
     # Convert to DataFrame
     final_df = pd.DataFrame.from_dict(response_dict, orient='index')
     final_df.index.name = 'Date'  # Ensure 'Date' is the index
-    # print(final_df.isnull().sum())
-    # print(final_df.dtypes)
-    # print(f"Weather dates: {weatherETc_dict.keys()}")
-    # print(f"Satellite dates: {satelite_dict['Date'].unique()}")
-    # print(f"Satellite stats dates: {satellie_stats_dict.keys()}")
-    # print(f"Satellite stats data: {satellie_stats_dict}")
-# 
+
     # Pass to generateET from et.so
     et_result_df = et.generateET(final_df)
-    # print(et.generateET(final_df) ) #for testing. 
-
     # Return the DataFrame with 'Date' as index and 'ETa__in' column
-    return et_result_df[['ETa__in']].to_json(orient='index')
+    return et_result_df.to_dict(orient='index')
 
   
 import psycopg2
@@ -6471,7 +6471,7 @@ def getEtoFromWeather():
     
     return jsonify(response)
 
-@app.route('/getET')
+@app.route('/getETA')
 def getEtFn():
     agstack_geoid = request.args['geoid']
     start_date = request.args['start_date']
@@ -6481,8 +6481,8 @@ def getEtFn():
 
     response = {
         'data': json_data,
-        'metadata':eto_metadata(),
-        'metadata-description':get_eto_data_description()
+        'metadata':getETA_metadata(),
+        'metadata-description':getETA_description()
         }
     return response
     
