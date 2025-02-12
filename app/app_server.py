@@ -5158,9 +5158,11 @@ def getRnet(rad_df):
     rad_df['Rnet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
     return pd.DataFrame(rad_df.loc[:,'Rnet'])
 
+
 def getWeatherForGeoid(df, agstack_geoid):
     """Process weather data with the specified data flow"""
     region = getRegion(agstack_geoid)
+    print(f'region--{region}')
     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     
@@ -5188,7 +5190,6 @@ def getWeatherForGeoid(df, agstack_geoid):
             return None
 
         source_records = []
-        aus_forecasted_data = None  # Store AUS-FORECASTED data separately
 
         for source in date_data['source'].unique():
             source_df = date_data[date_data['source'] == source]
@@ -5198,14 +5199,14 @@ def getWeatherForGeoid(df, agstack_geoid):
             # print(f'before aus function --{source}')
         
             # Process source-specific data
-            if source in ['AUS', 'AUS-FORECASTED'] and region == 'AUS':
+            if region == 'AUS':
                 processed_df = process_aus(source_df, source)
 
             elif source in ['NCEP', 'NLDAS']:
                 processed_df = process_ncep(source_df)
             elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
                 processed_df = process_cimis_noaa(source_df)
-            elif region == 'USA-!CA' and source in ['GHCND','NOAA','NOAA-FORECAST']:
+            elif region == 'USA-!CA':
                 processed_df = process_noaa_ghcnd(source_df,source)
             elif region == 'OTHER':
                 processed_df = process_other_region(source_df)
@@ -5228,12 +5229,18 @@ def getWeatherForGeoid(df, agstack_geoid):
         # Combine valid values across all sources, filtering None
         resultDict = {}
 
+            
         if region == 'USA-!CA':    
+            
             for items in source_records:
+                if items['source'] == 'GHCND':
+                    resultDict['Wavg']=items.get('AWND')
+                    if 'ETo__in' in items:
+                        resultDict['ETo__in'] = items['ETo__in']
                 # Check source type and assign values accordingly
-                # if items['source'] == 'NCEP':
-                #     if 'Rnet' in items:
-                #         resultDict['Rnet'] = items['Rnet']
+                if items['source'] == 'NCEP':
+                    if 'Rnet' in items:
+                        resultDict['Rnet'] = items['Rnet']
                 if items['source'] == 'NOAA':
                     if 'Tavg' in items:
                         resultDict['Tavg'] = items['Tavg']
@@ -5242,23 +5249,30 @@ def getWeatherForGeoid(df, agstack_geoid):
                         resultDict['Wavg'] = items['Wavg']
                     if 'Rnet' in items:
                         resultDict['Rnet'] = items['Rnet']
-                elif items['source'] == 'GHCND':
-                    if 'ETo__in' in items:
-                        resultDict['ETo__in'] = items['ETo__in']
+                elif source != 'NOAA-FORECAST' and source == 'CIMIS':
+                    resultDict['Wavg'] = items['Wavg']
+                    
                 # Ensure 'Date' key is always assigned, even if other keys are missing
                 if 'Date' in items:
                     resultDict['Date'] = items['Date']
         
         elif region == 'AUS':
+            
             for items in source_records:
+                if items['source'] == 'GHCND':
+                    resultDict['Wavg']=items.get('AWND')
+                    resultDict['ETo__in'] = items.get('ETo__in')
+                        
                 if items['source'] == 'AUS':
                     if 'ETo__in' and 'Wavg' and 'Tavg' in items:
                         resultDict['ETo__in'] = items['ETo__in']
                         resultDict['Wavg'] = items['Wavg']
                         resultDict['Tavg'] = items['Tavg']
+                        
                 elif items['source'] == 'AUS-FORECASTED':
-                    if 'Rnet' in items:
                         resultDict['Rnet'] = items['Rnet']
+                        resultDict['Tavg'] =  items['Tavg'] + 273.15 
+                        resultDict['ETo__in'] = items.get('ETo__in')
                 if 'Date' in items:
                     resultDict['Date'] = items['Date']
                       
@@ -5288,21 +5302,28 @@ def reformat_datetime(df):
     return df
 
 def process_aus(source_df, source):
+    
     """Process AUS source data"""
-
     aus_df = pd.DataFrame()
     aus_df_forecast_df = pd.DataFrame()
+    ghcnd_df = pd.DataFrame()
+
     if source == "AUS":
         aus_df['ETo__in'] = source_df['ETo_AVG_IN']
         aus_df['Wavg'] = source_df['U_z']    
         aus_df['Tavg'] = source_df['T_mean'] + 273.15  # Convert to Kelvin
 
     elif source == 'AUS-FORECASTED':
-        aus_df_forecast_df['Rnet'] = source_df['R_n__MJpm2']
-       
+        aus_df_forecast_df['Rnet'] =  source_df['R_n__MJpm2']
+        aus_df_forecast_df['Tavg'] =  source_df['T_mean'] + 273.15 
+        aus_df_forecast_df['ETo__in'] =  source_df['ETo_average_inches']
+        
+    elif source =='GHCND':
+        ghcnd_df['Wavg'] = source_df['AWND']
+        ghcnd_df['ETo__in'] = source_df['ETo_AVG_IN']
+        
     # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([aus_df, aus_df_forecast_df])
-    
+    df_final = source_df.join([aus_df, aus_df_forecast_df,ghcnd_df])
     # Check if the required columns exist before printing
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     available_columns = [col for col in required_columns if col in df_final.columns]
@@ -5370,13 +5391,10 @@ def process_cimis_noaa(source_df):
 def process_noaa_ghcnd(source_df, source):
     """Process NOAA and GHCND data"""
     df = source_df.copy()
-    
-    # Initialize variables
-    ghcnd_eto, noaa_eto = None, None
     ghcnd_df = pd.DataFrame()
     noaa_df = pd.DataFrame()
     noaa_forecast_df = pd.DataFrame()
-    
+    cimis_df = pd.DataFrame()
     # Process based on source
     if source == 'GHCND':
         ghcnd_df['ETo__in'] = df['ETo_AVG_IN']
@@ -5387,12 +5405,18 @@ def process_noaa_ghcnd(source_df, source):
         # noaa_df['ETo__in'] = df['ETo_AVG_IN']  # Ensure ETo is assigned
 
     # Process for NOAA-FORECAST source
-    if source == 'NOAA-FORECAST':
+    if source == 'NOAA-FORECAST' or source == 'NLDAS':
         noaa_forecast_df['Wavg'] = df['U_z']
         noaa_forecast_df['Rnet'] = df['R_n__MJpm2']
-    
+        
+    elif source != 'NOAA-FORECAST' and source == 'CIMIS':
+        cimis_df['Wavg'] = df['HlyWindSpd']
+        
+    elif source != 'NOAA-FORECAST' and source == 'GHCND':
+        ghcnd_df['Wavg'] = df['AWND']
+
     # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([ghcnd_df, noaa_df, noaa_forecast_df])
+    df_final = source_df.join([ghcnd_df, noaa_df, noaa_forecast_df , cimis_df])
     
     # Check if the required columns exist before printing
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
@@ -5441,22 +5465,35 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         getWeatherFromNLDAS,
         getWeatherFromCIMIS
     ]
-    source_names = ['NCEP', 'AUS', 'AUS-FORECASTED','NOAA','NOAA-FORECAST', 'GHCND', 'NLDAS', 'CIMIS']
+    source_names = ['NCEP', 'AUS', 'AUS-FORECASTED', 'NOAA', 'NOAA-FORECAST', 'GHCND', 'NLDAS', 'CIMIS']
 
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(func, geoid, start_date, end_date): name for func, name in zip(weather_functions, source_names)}
-        
+
         dataframes = []
         for future in futures:
-            df = future.result()
             source = futures[future]
-            
-            if df is None or df.empty:
-                continue
-            
-            df['source'] = source
-            processed_df = getWeatherForGeoid(df, geoid)
-            dataframes.append(processed_df)
+            try:
+                df = future.result()
+                if df is None:
+                    print(f"Source {source} returned None")
+                    continue
+                if df.empty:
+                    print(f"Source {source} returned an empty DataFrame")
+                    continue
+
+                df['source'] = source
+                print(f"Added source for {source}: {df['source'].unique()}")
+
+                processed_df = getWeatherForGeoid(df, geoid)
+                processed_df['source'] = source
+                if 'source' not in processed_df.columns:
+                    print(f"'source' column missing after processing {source}")
+
+                dataframes.append(processed_df)
+
+            except Exception as e:
+                print(f"Error fetching data from {source}: {e}")
 
     if not dataframes:
         print("No data available from any source.")
