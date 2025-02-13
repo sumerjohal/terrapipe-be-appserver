@@ -28567,123 +28567,123 @@ def interpolateMissingValsEtcWeather(weather_df):
 
 
 
-# def getWeatherForGeoid(df, agstack_geoid):
-#     """Process weather data with the specified data flow"""
+def getWeatherForGeoid(df, agstack_geoid):
+    """Process weather data with the specified data flow"""
 
-#     region = getRegion(agstack_geoid)
-#     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
-#     required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']  # Updated
+    region = getRegion(agstack_geoid)
+    config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+    required_columns = ['Avg_Eto', 'WindRun', 'T_mean', 'R_net']  # Updated
     
-#     # Preprocess data sources
-#     df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
-#     df = df.dropna(subset=['Date'])
-#     print(df.columns)
-#     start_date = df['Date'].min()
-#     end_date = df['Date'].max()
-#     full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-#     df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
-#     df = df.interpolate(method='linear')
+    # Preprocess data sources
+    df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+    df = df.dropna(subset=['Date'])
+    print(df.columns)
+    start_date = df['Date'].min()
+    end_date = df['Date'].max()
+    full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
+    df = df.interpolate(method='linear')
     
-#     def process_date(df, current_date):
-#         """Process data for a single date"""
-#         date_data = df[df['Date'] == current_date]
-#         if date_data.empty:
-#             return None
+    def process_date(df, current_date):
+        """Process data for a single date"""
+        date_data = df[df['Date'] == current_date]
+        if date_data.empty:
+            return None
     
-#         source_results = {}
+        source_results = {}
         
-#         # Process each source separately
-#         for source, weight in zip(config['sources'], config['weights']):
-#             source_df = date_data[date_data['source'] == source]
-#             if source_df.empty:
-#                 continue
+        # Process each source separately
+        for source, weight in zip(config['sources'], config['weights']):
+            source_df = date_data[date_data['source'] == source]
+            if source_df.empty:
+                continue
             
-#             # Apply source-specific processing
-#             try:
-#                 if source == 'AUS' and region == 'AUS':
-#                     source_df = process_aus(source_df)
-#                 elif source == 'NCEP':
-#                     source_df = process_ncep(source_df)
-#             except Exception as e:
-#                 print(f"Error processing {source} data: {e}")
-#                 continue
+            # Apply source-specific processing
+            try:
+                if source == 'AUS' and region == 'AUS':
+                    source_df = process_aus(source_df)
+                elif source == 'NCEP':
+                    source_df = process_ncep(source_df)
+            except Exception as e:
+                print(f"Error processing {source} data: {e}")
+                continue
                 
-#             # Ensure all required columns exist
-#             for col in required_columns:
-#                 if col not in source_df.columns:
-#                     source_df[col] = np.nan  # Assign NaN if missing
-#             wkt = fetchWKT(agstack_geoid)
-#             polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
-#             geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
-#             coords = list(polygon.exterior.coords)
+            # Ensure all required columns exist
+            for col in required_columns:
+                if col not in source_df.columns:
+                    source_df[col] = np.nan  # Assign NaN if missing
+            wkt = fetchWKT(agstack_geoid)
+            polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
+            geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+            coords = list(polygon.exterior.coords)
             
-#             lon_col = None
-#             if 'lon' in source_df.columns:
-#                 lon_col = 'lon'
-#             elif 'longitude' in source_df.columns:
-#                 lon_col = 'longitude'
+            lon_col = None
+            if 'lon' in source_df.columns:
+                lon_col = 'lon'
+            elif 'longitude' in source_df.columns:
+                lon_col = 'longitude'
                 
-#             lat_col = None
-#             if 'lat' in source_df.columns:
-#                 lat_col = 'lat'
-#             elif 'latitude' in source_df.columns:
-#                 lat_col = 'latitude'
+            lat_col = None
+            if 'lat' in source_df.columns:
+                lat_col = 'lat'
+            elif 'latitude' in source_df.columns:
+                lat_col = 'latitude'
 
-#             if not lon_col or not lat_col:
-#                 print(f"Missing coordinates for {source} data")
-#                 continue
+            if not lon_col or not lat_col:
+                print(f"Missing coordinates for {source} data")
+                continue
 
-#             geometry = [Point(lon, lat) for lon, lat in zip(source_df[lon_col], source_df[lat_col])]
-#             gdf = gpd.GeoDataFrame(source_df, geometry=geometry, crs="EPSG:4326")
-#             if coords[0] != coords[-1]:
-#                 coords.append(coords[0])  # Close the polygon manually
-#             stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
+            geometry = [Point(lon, lat) for lon, lat in zip(source_df[lon_col], source_df[lat_col])]
+            gdf = gpd.GeoDataFrame(source_df, geometry=geometry, crs="EPSG:4326")
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])  # Close the polygon manually
+            stnPoints = [Point(lon, lat) for lon, lat in coords]  # Convert coordinates to Point objects
 
-#             # df['StationId'] = create_station_id(stnPoints ,centroid)
-#             # stns = pd.unique(df.StationId)
+            # df['StationId'] = create_station_id(stnPoints ,centroid)
+            # stns = pd.unique(df.StationId)
             
-#             # Proper weight calculation (missing in current code):
-#             distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
-#             nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
-#             nearest_data = source_df.iloc[nearest_idx]
-#             dist_values = distances.iloc[nearest_idx].values
-#             weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
-#             weights /= weights.sum()  # Normalize to sum=1
+            # Proper weight calculation (missing in current code):
+            distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
+            nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
+            nearest_data = source_df.iloc[nearest_idx]
+            dist_values = distances.iloc[nearest_idx].values
+            weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
+            weights /= weights.sum()  # Normalize to sum=1
 
-#             # Print station points (lat, lon) for the nearest stations
-#             # Print station details with weights
-#             print(f"\n--- {source} source weights for {current_date.date()} ---")
-#             print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
-#             for i, idx in enumerate(nearest_idx):
-#                 station = source_df.iloc[idx]
-#                 distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
-#                 print(f"Station {i+1}:")
-#                 print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
-#                 print(f"  Distance: {distance_km:.2f} km")
-#                 print(f"  Weight: {weights[i]:.4f}")
-#                 print(f"  Contributing values:")
-#                 for col in required_columns:
-#                     print(f"    {col}: {station[col]:.2f}")
+            # Print station points (lat, lon) for the nearest stations
+            # Print station details with weights
+            print(f"\n--- {source} source weights for {current_date.date()} ---")
+            print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
+            for i, idx in enumerate(nearest_idx):
+                station = source_df.iloc[idx]
+                distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
+                print(f"Station {i+1}:")
+                print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
+                print(f"  Distance: {distance_km:.2f} km")
+                print(f"  Weight: {weights[i]:.4f}")
+                print(f"  Contributing values:")
+                for col in required_columns:
+                    print(f"    {col}: {station[col]:.2f}")
                     
-#             # Calculate weighted averages for the nearest stations
-#             weighted_data = []
-#             for i, idx in enumerate(nearest_idx):
-#                 station_data = nearest_data.iloc[i]
-#                 weighted_station = {
-#                     col: station_data[col] * config['weights'][i]  # Assuming config contains weights
-#                     for col in required_columns  # Now uses correct columns
-#                 }
-#                 weighted_data.append(weighted_station)
+            # Calculate weighted averages for the nearest stations
+            weighted_data = []
+            for i, idx in enumerate(nearest_idx):
+                station_data = nearest_data.iloc[i]
+                weighted_station = {
+                    col: station_data[col] * config['weights'][i]  # Assuming config contains weights
+                    for col in required_columns  # Now uses correct columns
+                }
+                weighted_data.append(weighted_station)
             
-#             # Aggregate the weighted data
-#             source_avg = {col: np.sum([d[col] for d in weighted_data]) for col in required_columns}
-#             source_results[source] = source_avg
+            # Aggregate the weighted data
+            source_avg = {col: np.sum([d[col] for d in weighted_data]) for col in required_columns}
+            source_results[source] = source_avg
         
-#         # Combine sources using region weights
-#         final_avg = combine_sources(source_results, config)
-#         final_avg['Date'] = current_date
+        # Combine sources using region weights
+        final_avg = combine_sources(source_results, config)
+        final_avg['Date'] = current_date
         
-#         return final_avg
+        return final_avg
     
 #     unique_dates = df['Date'].unique()
 #     # Process all dates in parallel

@@ -5217,7 +5217,75 @@ def getWeatherForGeoid(df, agstack_geoid):
             for col in required_columns:
                 if col not in processed_df.columns:
                     processed_df[col] = 0.0
+            wkt = fetchWKT(agstack_geoid)
+            polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
+            geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
             
+            lon_col = None
+            if 'lon' in processed_df.columns:
+                lon_col = 'lon'
+            elif 'longitude' in processed_df.columns:
+                lon_col = 'longitude'
+                
+            lat_col = None
+            if 'lat' in processed_df.columns:
+                lat_col = 'lat'
+            elif 'latitude' in processed_df.columns:
+                lat_col = 'latitude'
+
+            if not lon_col or not lat_col:
+                print(f"Missing coordinates for {source} data")
+                continue
+
+            geometry = [Point(lon, lat) for lon, lat in zip(processed_df[lon_col], processed_df[lat_col])]
+            gdf = gpd.GeoDataFrame(processed_df, geometry=geometry, crs="EPSG:4326")
+            # df['StationId'] = create_station_id(stnPoints ,centroid)
+            # stns = pd.unique(df.StationId)
+            
+            # Proper weight calculation (missing in current code):
+            distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
+            nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
+            nearest_data = processed_df.iloc[nearest_idx]
+            # Avoid division by zero: replace zero distances with a small value
+            
+            nearest_data['distance'] = distances.iloc[nearest_idx].replace(0, 1e-6)
+            nearest_data['weight'] = 1 / nearest_data['distance']
+            nearest_data['weight'] /= nearest_data['weight'].sum()
+            weighted_avg_eto = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
+            print(f'weighted_avg_eto--{weighted_avg_eto}')
+            nearest_data['ETo__in'] = weighted_avg_eto
+            # Compute station-weighted ETo
+            # station_weighted_eto = weighted_avg_eto
+            # # Get region-level weights
+            # region_info = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])  # Default to 'OTHER' config
+            # # print(f'region_info--{region_info}')
+            # region_sources = region_info['sources'][0]
+            # # print(f'region_sources--{region_sources}')
+            # region_weights = region_info['weights']
+            # # Get weight for this source from REGION_CONFIG
+            # source_weight = region_weights[region_sources.index(source)]
+            # final_eto = station_weighted_eto * source_weight
+            # print(f'final_eto--{final_eto}')
+
+            # print(nearest_data['ETo__in'])
+            # dist_values = distances.iloc[nearest_idx].values
+            # weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
+            # weights /= weights.sum()  # Normalize to sum=1
+
+            # Print station points (lat, lon) for the nearest stations
+            # Print station details with weights
+        #     print(f"\n--- {source} source weights for {current_date.date()} ---")
+        #     print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
+        #     for i, idx in enumerate(nearest_idx):
+        #         station = processed_df.iloc[idx]
+        #         distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
+        #         print(f"Station {i+1}:")
+        #         print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
+        #         print(f"  Distance: {distance_km:.2f} km")
+        #         print(f"  Weight: {weights[i]:.4f}")
+        #         print(f"  Contributing values:")
+        #         for col in required_columns:
+        #             print(f"    {col}: {station[col]:.2f}")    
             source_records.extend(processed_df.to_dict('records'))
 
         if not source_records:
@@ -5257,22 +5325,25 @@ def getWeatherForGeoid(df, agstack_geoid):
                     resultDict['Date'] = items['Date']
         
         elif region == 'AUS':
-            
+                
             for items in source_records:
-                if items['source'] == 'GHCND':
-                    resultDict['Wavg']=items.get('AWND')
-                    resultDict['ETo__in'] = items.get('ETo__in')
+
                         
                 if items['source'] == 'AUS':
-                    if 'ETo__in' and 'Wavg' and 'Tavg' in items:
-                        resultDict['ETo__in'] = items['ETo__in']
-                        resultDict['Wavg'] = items['Wavg']
-                        resultDict['Tavg'] = items['Tavg']
-                        
+                    resultDict['Wavg'] = items['Wavg']
+                    resultDict['Tavg'] = items['Tavg']
+                    
                 elif items['source'] == 'AUS-FORECASTED':
-                        resultDict['Rnet'] = items['Rnet']
-                        resultDict['Tavg'] =  items['Tavg'] + 273.15 
+                    
+                    resultDict['ETo__in'] = items['ETo__in']
+                    resultDict['Rnet'] = items['Rnet']
+                    resultDict['Tavg'] =  items['Tavg'] + 273.15 
+                    
+                if items['ETo__in'] == 0 and  items['Wavg']:    
+                    if items['source'] == 'GHCND':
+                        resultDict['Wavg']=items.get('AWND')
                         resultDict['ETo__in'] = items.get('ETo__in')
+
                 if 'Date' in items:
                     resultDict['Date'] = items['Date']
                       
