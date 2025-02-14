@@ -5158,50 +5158,62 @@ def getRnet(rad_df):
     rad_df['Rnet'] = (SW_D_df - SW_U_df) + (LW_D_df - LW_U_df)
     return pd.DataFrame(rad_df.loc[:,'Rnet'])
 
+def normalize_weights(weights):
+    """Normalize the given weights so their sum equals 1."""
+    total_weight = np.sum(weights)
+    if total_weight == 0:
+        return np.zeros_like(weights)
+    return weights / total_weight
 
-def getWeatherForGeoid(df, agstack_geoid):
-    """Process weather data with the specified data flow"""
+def getWeatherForGeoid(df, agstack_geoid, debug=True):
+    """Process weather data for a specific geoid location."""
+    
+    ## Get the region for the given geoid
     region = getRegion(agstack_geoid)
-    print(f'region--{region}')
+    if debug:
+        print(f'region--{region}')
+        
+    ## Retrieve region-specific configuration
     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+    
+    ## Define required columns in the output
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
     
+    ## Return empty DataFrame if input data is empty
     if df.empty:
         return pd.DataFrame(columns=required_columns + ['Date'])
-
-    # Preprocess data sources
+    
+    ## Convert Year, Month, and Day columns into a Date column
     try:
         df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
     except:
-        df['Date'] = df['TS']
+        df['Date'] = df['TS']  # Fallback in case Year, Month, Day are missing
     
-    # Drop duplicate dates    
+    ## Remove duplicate dates and create a complete daily time series
     df = df.drop_duplicates(subset='Date')
-    start_date = df['Date'].min()
-    end_date = df['Date'].max()
-    full_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-    df = df.set_index('Date').reindex(full_date_range).reset_index().rename(columns={'index': 'Date'})
-    df = df.interpolate(method='linear')
-
-    def process_date(current_date):
-        """Process data for a single date"""
+    df = df.set_index('Date').reindex(
+        pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')
+    ).reset_index().rename(columns={'index': 'Date'})
+    df = df.interpolate(method='linear')  # Fill missing values with interpolation
+    
+    ## List to store processed data from different sources and dates
+    all_processed_data = []
+    
+    ## Iterate over each unique date in the dataset
+    for current_date in df['Date'].unique():
         date_data = df[df['Date'] == current_date]
         if date_data.empty:
-            return None
+            continue
 
-        source_records = []
-
+        ## Iterate over unique data sources for the given date
         for source in date_data['source'].unique():
             source_df = date_data[date_data['source'] == source]
             if source_df.empty:
                 continue
             
-            # print(f'before aus function --{source}')
-        
-            # Process source-specific data
+            ## Process data differently based on region
             if region == 'AUS':
                 processed_df = process_aus(source_df, source)
-
             elif source in ['NCEP', 'NLDAS']:
                 processed_df = process_ncep(source_df)
             elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
@@ -5213,156 +5225,286 @@ def getWeatherForGeoid(df, agstack_geoid):
             else:
                 continue
             
-            # Ensure required columns exist
+            ## Ensure all required columns exist, defaulting to 0.0 if missing
             for col in required_columns:
                 if col not in processed_df.columns:
                     processed_df[col] = 0.0
+            
+            ## Extract geoid latitude and longitude
             wkt = fetchWKT(agstack_geoid)
-            polygon = loads(wkt)  # Convert the WKT string to a Shapely geometry object
             geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
             
-            lon_col = None
-            if 'lon' in processed_df.columns:
-                lon_col = 'lon'
-            elif 'longitude' in processed_df.columns:
-                lon_col = 'longitude'
-                
-            lat_col = None
-            if 'lat' in processed_df.columns:
-                lat_col = 'lat'
-            elif 'latitude' in processed_df.columns:
-                lat_col = 'latitude'
-
+            ## Dynamically identify latitude and longitude column names
+            lon_col = 'lon' if 'lon' in processed_df.columns else 'longitude' if 'longitude' in processed_df.columns else None
+            lat_col = 'lat' if 'lat' in processed_df.columns else 'latitude' if 'latitude' in processed_df.columns else None
+            
+            ## If lat/lon columns are missing, skip this source
             if not lon_col or not lat_col:
-                print(f"Missing coordinates for {source} data")
+                if debug:
+                    print(f"Missing coordinates for {source} data")
                 continue
-
-            geometry = [Point(lon, lat) for lon, lat in zip(processed_df[lon_col], processed_df[lat_col])]
-            gdf = gpd.GeoDataFrame(processed_df, geometry=geometry, crs="EPSG:4326")
-            # df['StationId'] = create_station_id(stnPoints ,centroid)
-            # stns = pd.unique(df.StationId)
+            processed_df['distance'] = processed_df.apply(lambda row: geodesic(
+                    (row[lat_col], row[lon_col]), (geoid_lat, geoid_lon)
+                ).km, axis=1)
             
-            # Proper weight calculation (missing in current code):
-            distances = gdf.geometry.distance(Point(geoid_lon, geoid_lat))
-            nearest_idx = distances.argsort()[:5]  # Get the indices of the 5 nearest stations
-            nearest_data = processed_df.iloc[nearest_idx]
-            # Avoid division by zero: replace zero distances with a small value
+            print(f"Total available stations: {len(processed_df)}")
+
+            ## Compute distances from geoid location to all station locations
+            distances_km = [
+                geodesic((lat, lon), (geoid_lat, geoid_lon)).km 
+                for lat, lon in zip(processed_df[lat_col], processed_df[lon_col])
+            ]
+                        
+            ## Find indices of 5 nearest stations
+            nearest_idx = np.argsort(distances_km)[:5]
+            nearest_data = processed_df.iloc[nearest_idx].copy()
+            nearest_data['distance'] = np.array(distances_km)[nearest_idx]
             
-            nearest_data['distance'] = distances.iloc[nearest_idx].replace(0, 1e-6)
-            nearest_data['weight'] = 1 / nearest_data['distance']
-            nearest_data['weight'] /= nearest_data['weight'].sum()
-            weighted_avg_eto = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
-            print(f'weighted_avg_eto--{weighted_avg_eto}')
-            nearest_data['ETo__in'] = weighted_avg_eto
-            # Compute station-weighted ETo
-            # station_weighted_eto = weighted_avg_eto
-            # # Get region-level weights
-            # region_info = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])  # Default to 'OTHER' config
-            # # print(f'region_info--{region_info}')
-            # region_sources = region_info['sources'][0]
-            # # print(f'region_sources--{region_sources}')
-            # region_weights = region_info['weights']
-            # # Get weight for this source from REGION_CONFIG
-            # source_weight = region_weights[region_sources.index(source)]
-            # final_eto = station_weighted_eto * source_weight
-            # print(f'final_eto--{final_eto}')
+            
+            # print("\nNearest 5 Stations:")
+            # print(nearest_data[['lat', 'lon', 'distance']])
+            
+            ## Compute inverse distance weights
+            # raw_weights = 1 / (nearest_data['distance'] + 1e-6)
+            raw_weights = (1 / (nearest_data['distance'] + 1e-6)) ** 2 # This makes the weight difference between close and far stations even more pronounced.
 
-            # print(nearest_data['ETo__in'])
-            # dist_values = distances.iloc[nearest_idx].values
-            # weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
-            # weights /= weights.sum()  # Normalize to sum=1
+            normalized_weights = normalize_weights(raw_weights)
+            
+            ## Assign weights and compute weighted ETo
+            nearest_data['weight'] = normalized_weights
+            nearest_data['weighted_ETo'] = nearest_data['ETo__in'] * nearest_data['weight']
+            nearest_data['Date'] = current_date
+            
+            ## Print debugging information for nearest stations
+            if debug:
+                # print(f"\n--- Nearest Stations for Source: {source} on {current_date} ---")
+                # print(f"{'Distance (km)':<15} {'Raw Weight':<15} {'Normalized Weight':<20} {'Weighted ETo':<15}")
+                for idx, row in nearest_data.iterrows():
+                    pass
+                    # print(f" {row['distance']:<15.6f} {raw_weights[idx]:<15.6f} {normalized_weights[idx]:<20.6f} {row['weighted_ETo']:<15.6f}")
+                # print(f"Sum of Normalized Weights: {normalized_weights.sum()} (Should be ~1.0)\n")
+            
+            ## Store final ETo value after applying weights
+            nearest_data['ETo__in'] = nearest_data['weighted_ETo']
+            
+            ## Store processed data for later combination
+            all_processed_data.append(nearest_data)
+    
+    ## If no data was processed, return an empty DataFrame
+    if not all_processed_data:
+        return pd.DataFrame(columns=required_columns + ['Date'])
+    
+    ## Combine all processed data into a final DataFrame
+    final_df = pd.concat(all_processed_data, ignore_index=True)
+    return final_df
 
-            # Print station points (lat, lon) for the nearest stations
-            # Print station details with weights
-        #     print(f"\n--- {source} source weights for {current_date.date()} ---")
-        #     print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
-        #     for i, idx in enumerate(nearest_idx):
-        #         station = processed_df.iloc[idx]
-        #         distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
-        #         print(f"Station {i+1}:")
-        #         print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
-        #         print(f"  Distance: {distance_km:.2f} km")
-        #         print(f"  Weight: {weights[i]:.4f}")
-        #         print(f"  Contributing values:")
-        #         for col in required_columns:
-        #             print(f"    {col}: {station[col]:.2f}")    
-            source_records.extend(processed_df.to_dict('records'))
 
-        if not source_records:
-            return None
-
-        # Convert to DataFrame for easier processing
-        source_df = pd.DataFrame(source_records)
+# def getWeatherForGeoid(df, agstack_geoid, debug=True):  # Add debug flag
+#     """Process weather data with the specified data flow"""
+#     region = getRegion(agstack_geoid)
+#     if debug:
+#         print(f'region--{region}')
         
-        # Combine valid values across all sources, filtering None
-        resultDict = {}
+#     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+#     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
+
+#     if df.empty:
+#         return pd.DataFrame(columns=required_columns + ['Date'])
+
+#     try:
+#         df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+#     except:
+#         df['Date'] = df['TS']
+
+#     df = df.drop_duplicates(subset='Date')
+#     df = df.set_index('Date').reindex(pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')).reset_index().rename(columns={'index': 'Date'})
+#     df = df.interpolate(method='linear')
+
+#     def process_date(current_date):
+#         date_data = df[df['Date'] == current_date]
+#         if date_data.empty:
+#             return None
+
+#         source_records = []
+#         for source in date_data['source'].unique():
+#             source_df = date_data[date_data['source'] == source]
+#             if source_df.empty:
+#                 continue
+            
+#             # Process source-specific data
+#             if region == 'AUS':
+#                 processed_df = process_aus(source_df, source)
+#             else:
+#                 continue
+            
+#             # Ensure required columns exist
+#             for col in required_columns:
+#                 if col not in processed_df.columns:
+#                     processed_df[col] = 0.0
+
+#             wkt = fetchWKT(agstack_geoid)
+#             geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+
+#             lon_col = 'lon' if 'lon' in processed_df.columns else 'longitude' if 'longitude' in processed_df.columns else None
+#             lat_col = 'lat' if 'lat' in processed_df.columns else 'latitude' if 'latitude' in processed_df.columns else None
+            
+#             if not lon_col or not lat_col:
+#                 if debug:
+#                     print(f"Missing coordinates for {source} data")
+#                 continue
+
+#             distances_km = [geodesic((lat, lon), (geoid_lat, geoid_lon)).km for lat, lon in zip(processed_df[lat_col], processed_df[lon_col])]
+#             nearest_idx = np.argsort(distances_km)[:5]
+#             print(f'nearest_idx --{nearest_idx}')
+            
+#             nearest_data = processed_df.iloc[nearest_idx].copy()
+
+#             nearest_data['distance'] = np.array(distances_km)[nearest_idx]
+
+#             raw_weights = 1 / (nearest_data['distance'] + 1e-6)
+#             # Print all weights at once
+#             print(f"raw_weights:\n{raw_weights}\n source -{source}")
+#             normalized_weights = normalize_weights(raw_weights)
+#             print(f"normalized_weights:\n{normalized_weights}\n source -{source}")
+#             print(f"Sum of Normalized Weights: {normalized_weights.sum()}\n source -{source}")  # Should be 1
+#             nearest_data['weight'] = normalized_weights
+#             nearest_data['weighted_ETo'] = nearest_data['ETo__in'] * nearest_data['weight']
+#             nearest_data['Date'] = current_date
+#             # for idx, (eto, norm_weight, weighted_eto) in enumerate(zip(nearest_data['ETo__in'], normalized_weights, nearest_data['weighted_ETo'])):
+#             #     print(f"Station {idx} (Source: {source}): ETo = {eto:.6f}, Normalized Weight = {norm_weight:.6f}, Weighted ETo = {weighted_eto:.6f}")
+
+#             if debug:
+#                 # print("\n--- Normalized Weights ---")
+#                 # print(nearest_data[['distance', 'weight', 'weighted_ETo','source','Date']])
+#                 print("Sum of Normalized Weights:", np.sum(normalized_weights))  # Should be 1
+            
+#             nearest_data['ETo__in'] = nearest_data['weighted_ETo']
+            
+#             # Check sum before normalization
+#             # print("\nSum of Weights Before Normalization:", nearest_data['weight'].sum())
+#             # Print debug information
+#             print("\nNearest Stations:")
+#             # print(nearest_data[['distance', 'weight', 'ETo__in', 'weighted_ETo']])
+
+#             # Compute final weighted ETo
+#             weighted_avg_eto = nearest_data['weighted_ETo'].sum()
+#             # print(f"\nFinal Weighted ETo: {weighted_avg_eto:.5f}")
+
 
             
-        if region == 'USA-!CA':    
             
-            for items in source_records:
-                if items['source'] == 'GHCND':
-                    resultDict['Wavg']=items.get('AWND')
-                    if 'ETo__in' in items:
-                        resultDict['ETo__in'] = items['ETo__in']
-                # Check source type and assign values accordingly
-                if items['source'] == 'NCEP':
-                    if 'Rnet' in items:
-                        resultDict['Rnet'] = items['Rnet']
-                if items['source'] == 'NOAA':
-                    if 'Tavg' in items:
-                        resultDict['Tavg'] = items['Tavg']
-                elif items['source'] == 'NOAA-FORECAST':
-                    if 'Wavg' in items:
-                        resultDict['Wavg'] = items['Wavg']
-                    if 'Rnet' in items:
-                        resultDict['Rnet'] = items['Rnet']
-                elif source != 'NOAA-FORECAST' and source == 'CIMIS':
-                    resultDict['Wavg'] = items['Wavg']
+#             # Compute final weighted ETo
+            
+#             # print(f"\nFinal Weighted ETo: {weighted_avg_eto:.5f}")
+#             # Compute station-weighted ETo
+#             # station_weighted_eto = weighted_avg_eto
+#             # # Get region-level weights
+#             # region_info = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])  # Default to 'OTHER' config
+#             # # print(f'region_info--{region_info}')
+#             # region_sources = region_info['sources'][0]
+#             # # print(f'region_sources--{region_sources}')
+#             # region_weights = region_info['weights']
+#             # # Get weight for this source from REGION_CONFIG
+#             # source_weight = region_weights[region_sources.index(source)]
+#             # final_eto = station_weighted_eto * source_weight
+#             # print(f'final_eto--{final_eto}')
+
+#             # print(nearest_data['ETo__in'])
+#             # dist_values = distances.iloc[nearest_idx].values
+#             # weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
+#             # weights /= weights.sum()  # Normalize to sum=1
+
+#             # Print station points (lat, lon) for the nearest stations
+#             # Print station details with weights
+#         #     print(f"\n--- {source} source weights for {current_date.date()} ---")
+#         #     print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
+#         #     for i, idx in enumerate(nearest_idx):
+#         #         station = processed_df.iloc[idx]
+#         #         distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
+#         #         print(f"Station {i+1}:")
+#         #         print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
+#         #         print(f"  Distance: {distance_km:.2f} km")
+#         #         print(f"  Weight: {weights[i]:.4f}")
+#         #         print(f"  Contributing values:")
+#         #         for col in required_columns:
+#         #             print(f"    {col}: {station[col]:.2f}")    
+#             source_records.extend(processed_df.to_dict('records'))
+
+#         if not source_records:
+#             return None
+
+#         # Convert to DataFrame for easier processing
+#         source_df = pd.DataFrame(source_records)
+        
+#         # Combine valid values across all sources, filtering None
+#         resultDict = {}
+
+            
+#         if region == 'USA-!CA':    
+            
+#             for items in source_records:
+#                 if items['source'] == 'GHCND':
+#                     resultDict['Wavg']=items.get('AWND')
+#                     if 'ETo__in' in items:
+#                         resultDict['ETo__in'] = items['ETo__in']
+#                 # Check source type and assign values accordingly
+#                 if items['source'] == 'NCEP':
+#                     if 'Rnet' in items:
+#                         resultDict['Rnet'] = items['Rnet']
+#                 if items['source'] == 'NOAA':
+#                     if 'Tavg' in items:
+#                         resultDict['Tavg'] = items['Tavg']
+#                 elif items['source'] == 'NOAA-FORECAST':
+#                     if 'Wavg' in items:
+#                         resultDict['Wavg'] = items['Wavg']
+#                     if 'Rnet' in items:
+#                         resultDict['Rnet'] = items['Rnet']
+#                 elif source != 'NOAA-FORECAST' and source == 'CIMIS':
+#                     resultDict['Wavg'] = items['Wavg']
                     
-                # Ensure 'Date' key is always assigned, even if other keys are missing
-                if 'Date' in items:
-                    resultDict['Date'] = items['Date']
+#                 # Ensure 'Date' key is always assigned, even if other keys are missing
+#                 if 'Date' in items:
+#                     resultDict['Date'] = items['Date']
         
-        elif region == 'AUS':
+#         elif region == 'AUS':
                 
-            for items in source_records:
+#             for items in source_records:
 
                         
-                if items['source'] == 'AUS':
-                    resultDict['Wavg'] = items['Wavg']
-                    resultDict['Tavg'] = items['Tavg']
+#                 if items['source'] == 'AUS':
+#                     resultDict['ETo__in'] = items.get('ETo__in')
+#                     resultDict['Wavg'] = items['Wavg']
+#                     resultDict['Tavg'] = items['Tavg']
                     
-                elif items['source'] == 'AUS-FORECASTED':
+#                 elif items['source'] == 'AUS-FORECASTED':
                     
-                    resultDict['ETo__in'] = items['ETo__in']
-                    resultDict['Rnet'] = items['Rnet']
-                    resultDict['Tavg'] =  items['Tavg'] + 273.15 
+#                     resultDict['ETo__in'] = items['ETo__in']
+#                     resultDict['Rnet'] = items['Rnet']
+#                     resultDict['Tavg'] =  items['Tavg'] + 273.15 
                     
-                if items['ETo__in'] == 0 and  items['Wavg']:    
-                    if items['source'] == 'GHCND':
-                        resultDict['Wavg']=items.get('AWND')
-                        resultDict['ETo__in'] = items.get('ETo__in')
+#                 if items['ETo__in'] == 0 and  items['Wavg']:    
+#                     if items['source'] == 'GHCND':
+#                         resultDict['Wavg']=items.get('AWND')
 
-                if 'Date' in items:
-                    resultDict['Date'] = items['Date']
+#                 if 'Date' in items:
+#                     resultDict['Date'] = items['Date']
                       
-        return resultDict
+#         return resultDict
     
-    # Main processing flow
-    unique_dates = df['Date'].unique()
-    final_results = []
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_date, date) for date in unique_dates]
-        for future in futures:
-            result = future.result()
-            if result:
-                final_results.append(result)
+#     # Main processing flow
+#     unique_dates = df['Date'].unique()
+#     final_results = []
+#     with ThreadPoolExecutor() as executor:
+#         futures = [executor.submit(process_date, date) for date in unique_dates]
+#         for future in futures:
+#             result = future.result()
+#             if result:
+#                 final_results.append(result)
 
-    # Convert results to DataFrame if non-empty
-    final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
+#     # Convert results to DataFrame if non-empty
+#     final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
 
-    return final_df.reset_index(drop=True)
+#     return final_df.reset_index(drop=True)
 
 def reformat_datetime(df):
     """Reformat datetime to string (YYYY-MM-DD) and reset index"""
@@ -5544,28 +5686,24 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         dataframes = []
         for future in futures:
             source = futures[future]
-            try:
-                df = future.result()
-                if df is None:
-                    print(f"Source {source} returned None")
-                    continue
-                if df.empty:
-                    print(f"Source {source} returned an empty DataFrame")
-                    continue
+            
+            df = future.result()
+            if df is None:
+                print(f"Source {source} returned None")
+                continue
+            if df.empty:
+                print(f"Source {source} returned an empty DataFrame")
+                continue
 
-                df['source'] = source
-                print(f"Added source for {source}: {df['source'].unique()}")
+            df['source'] = source
+            print(f"Added source for {source}: {df['source'].unique()}")
 
-                processed_df = getWeatherForGeoid(df, geoid)
-                processed_df['source'] = source
-                if 'source' not in processed_df.columns:
-                    print(f"'source' column missing after processing {source}")
+            processed_df = getWeatherForGeoid(df, geoid)
+            processed_df['source'] = source
+            if 'source' not in processed_df.columns:
+                print(f"'source' column missing after processing {source}")
 
-                dataframes.append(processed_df)
-
-            except Exception as e:
-                print(f"Error fetching data from {source}: {e}")
-
+            dataframes.append(processed_df)
     if not dataframes:
         print("No data available from any source.")
         return pd.DataFrame()
