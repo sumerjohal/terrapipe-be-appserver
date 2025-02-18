@@ -67,7 +67,9 @@ from datetime import timedelta
 from collections import Counter
 from shapely.geometry import Polygon as ShapelyPolygon
 import et
-
+from s2sphere import RegionCoverer, LatLng, CellId, Cell, LatLngRect
+from pyproj import Transformer
+import psycopg2
 
 warnings.filterwarnings('ignore')
 
@@ -1212,7 +1214,6 @@ def getNDVIgdfFromGeoid(agstack_geoid, dt_str):
 
     # Fetch S2 tokens and geometries
     s2_tokens_gdf, boundary_gdf = polygon_to_s2_tokens(agstack_geoid, 19)
-    print(s2_tokens_gdf)
     # Perform spatial join to filter intersecting polygons
     intersecting_s19 = gpd.sjoin(s2_tokens_gdf, boundary_gdf, how="inner", predicate="intersects")
 
@@ -1243,7 +1244,7 @@ def getNDVIgdfFromGeoid(agstack_geoid, dt_str):
     if not list_of_L10_paths:
         # Return empty GeoDataFrame and boundary_gdf if no paths are found
         return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf
-
+    print(list_of_L10_paths)
     # Load weather datasets
     weather_datasets = [
         ds.dataset(path, format="parquet", partitioning="hive")
@@ -1341,15 +1342,11 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, end_date_str, N):
     
 
     intersecting_s19 = gpd.sjoin(s2_tokens_gdf, boundary_gdf, how="inner", predicate="intersects")
-    print(intersecting_s19)
 
    # Extract unique S2 indices and geometries
     L8_token_list = set(intersecting_s19['s2_index__L8'])
     L10_token_list = set(intersecting_s19['s2_index__L10'])
     L19_token_list = set(intersecting_s19['s2_index__L19'])
-    print(L8_token_list)
-    print(L10_token_list)
-    print(L19_token_list)
     geometry = intersecting_s19[['s2_index__L19', 'geometry']].drop_duplicates()
 
     ndvi_img_gdf = pd.DataFrame()
@@ -1368,9 +1365,6 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, end_date_str, N):
         for x in L10_token_list
         if os.path.exists(os.path.join(L8_path, f's2_index__L10={x}'))
     }
-    
-    print(list_of_L10_paths)
-    
     if not list_of_L10_paths:
         return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf , None
 
@@ -1393,11 +1387,6 @@ def getNDVIgdfFromGeoidEtc(agstack_geoid, end_date_str, N):
     if not available_dates:
         print("No data available in the specified range.")
         return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf, None
-
-
-    if not available_dates:
-        print("No data available in the specified range.")
-        return gpd.GeoDataFrame(columns=['s2_index__L19', 'NDVI', 'geometry']), boundary_gdf , None
 
     # Find the most recent date with data
     most_recent_date = max(available_dates)
@@ -2595,6 +2584,58 @@ def et_data_description():
     }
 
     return metadata_desc
+
+
+
+def get_era5_metadata():
+    
+    metadata = {
+        "Date": "datetime (UTC)",
+        "ETo": "millimeters per day",
+        "ETo_AVG_IN": "inches",
+        "ETo_AVG_MM": "mm",
+        "ETo_FAO_IN": "inches",
+        "ETo_FAO_MM": "mm",
+        "ETo_HAR_IN": "inches",
+        "ETo_HAR_MM": "mm",
+        "Rnet": "milliJoule per square metre",
+        "T_max": "C",
+        "T_mean": "C",
+        "T_min": "C",
+        "Wavg": "m/s",
+        "index": "integer",
+        "latitude": "degrees",
+        "longitude": "degrees",
+        "snowfall": "cm"
+    }
+
+    return metadata
+
+def get_era5_metadata_description():
+
+    metadata_era5_description = {
+        "Date": "The timestamp indicating the date and time when the measurements are valid.",
+        "ETo": "Reference evapotranspiration, the estimated evapotranspiration from a reference crop (grass) in millimeters per day",
+        "ETo_AVG_IN": "Average Evapotranspiration in inches",
+        "ETo_AVG_MM": "Average Evapotranspiration in mm",
+        "ETo_FAO_IN": "FAO-based Evapotranspiration in inches",
+        "ETo_FAO_MM": "FAO-based Evapotranspiration in mm",
+        "ETo_HAR_IN": "Hargreaves-based Evapotranspiration in inches",
+        "ETo_HAR_MM": "Hargreaves-based Evapotranspiration in mm",
+        "Rnet": "Net soalr radiation.",
+        "T_max": "Maximum Temperature (2m above ground)",
+        "T_mean": "Mean Temperature (2m above ground)",
+        "T_min": "Minimum Temperature (2m above ground)",
+        "Wavg": "Average wind speed",
+        "index":"index of data",
+        "latitude": "Latitude of the measurement location.",
+        "longitude": "Longitude of the measurement location.",
+        "snowfall": "Daily snowfall."
+        
+    }
+
+    return metadata_era5_description
+
 def get_satelite_stats_metadata():
 
     metadata = {
@@ -4937,6 +4978,44 @@ def getETA_description():
     
     return metadata_description
 
+
+def crop_data_metadata():
+    
+    metadata = {
+        "Crop" : "string",
+        "Year" : "integer"
+    }
+
+    return metadata
+
+def crop_data_metadata_description():
+
+    metadata_era5_description = {
+        "Crop" : "Name of the crop",
+        "Year" : "Year of the observation"
+    }
+
+    return metadata_era5_description
+
+def soil_properties_metadata():
+    
+    metadata = {
+        "Mean Value in Top-Soil" : "float",
+        "Property" : "string",
+        "Units" : "string"
+    }
+
+    return metadata
+
+def soil_properties_metadata_description():
+
+    soil_properties_metadata_description = {
+        "Mean Value in Top-Soil" : "mean value of the property",
+        "Property" : "name of the property",
+        "Units" : "units of the property"
+    }
+    return soil_properties_metadata_description
+
 # JRC
 def getWeatherFromJRC(agstack_geoid):
     filePath = "/network/TMF_UAD/"
@@ -5165,11 +5244,69 @@ def normalize_weights(weights):
         return np.zeros_like(weights)
     return weights / total_weight
 
+def getNearestNStnID(c, stnPoints, N, MIN_DISTANCE_THRESHOLD=100):
+    """
+    Finds the N nearest station points to the centroid `c` with a threshold to remove very close stations.
+    
+    Arguments:
+    - c : Point
+        Centroid point from which to calculate distances to station points.
+    - stnPoints : list of Point
+        List of station points (using shapely.geometry Point).
+    - N : int
+        The number of nearest stations to return.
+    - MIN_DISTANCE_THRESHOLD : float
+        Minimum distance to filter out very close stations. Default is 100 meters.
+    
+    Returns:
+    - list : [indices, ordered stations, ordered distances, ordered weights, raw weights]
+    """
+
+    dist = []
+    filtered_stnPoints = []
+
+    # Step 1: Calculate distances from centroid to each station point
+    for p in stnPoints:
+        d = float(c.distance(p))
+        if d == 0:
+            d = 0.000001  # Avoid division by zero or zero distance
+        dist.append(d)
+
+        # Step 2: Apply filtering based on MIN_DISTANCE_THRESHOLD
+        if all(p.distance(existing) > MIN_DISTANCE_THRESHOLD for existing in filtered_stnPoints):
+            filtered_stnPoints.append(p)
+
+    # Step 3: Sort distances and select the N nearest stations
+    idx = np.array([i[0] for i in sorted(enumerate(dist), key=lambda x: x[1])[:N]])
+
+    # Step 4: Adjust N if there are fewer stations than requested
+    M = min(N, len(filtered_stnPoints))  # Ensure we don't exceed available points
+    idx = idx[:M]  # Only use the first M indices
+
+    # Step 5: Order stations and distances by the sorted indices
+    orderedStns = [filtered_stnPoints[i] for i in idx]
+    orderedDist = [dist[i] for i in idx]
+
+    # Step 6: Calculate inverse distance weights (1/distance)
+    rawWghts = []
+    invDist = [1/d for d in orderedDist if d != 0]  # Avoid division by zero
+    den = sum(invDist)
+    rawWghts = invDist  # Raw weights (inverse distances)
+    
+    # Step 7: Normalize the weights
+    orderedWghts = [w / den for w in rawWghts]
+
+    # Step 8: Return both the normalized weights and the raw weights
+    return [idx, orderedStns, orderedDist, orderedWghts, rawWghts]
+
+
+
 def getWeatherForGeoid(df, agstack_geoid, debug=True):
     """Process weather data for a specific geoid location."""
 
     # Get the region for the given geoid
     region = getRegion(agstack_geoid)
+    print(region)
     if debug:
         print(f'Region: {region}')
 
@@ -5223,8 +5360,8 @@ def getWeatherForGeoid(df, agstack_geoid, debug=True):
                 processed_df = process_cimis_noaa(source_df)
             elif region == 'USA-!CA':
                 processed_df = process_noaa_ghcnd(source_df, source)
-            elif region == 'OTHER':
-                processed_df = process_other_region(source_df)
+            elif region == 'OTHER' and source in ['ERRA5']:
+                processed_df = process_erra5(source_df)
             else:
                 continue
 
@@ -5235,7 +5372,9 @@ def getWeatherForGeoid(df, agstack_geoid, debug=True):
 
             # Extract geoid coordinates
             wkt = fetchWKT(agstack_geoid)
-            geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+            polygon = loads(wkt)
+            centroid = polygon.centroid
+            # geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
 
             # Identify latitude/longitude columns
             lon_col = next((col for col in ['lon', 'longitude'] if col in processed_df.columns), None)
@@ -5246,41 +5385,45 @@ def getWeatherForGeoid(df, agstack_geoid, debug=True):
                     print(f"Missing coordinates for {source} data")
                 continue
 
-            # Compute distances
-            distances_km = np.array([
-                geodesic((lat, lon), (geoid_lat, geoid_lon)).km
-                for lat, lon in zip(processed_df[lat_col], processed_df[lon_col])
-            ])
+            # Get the station points (longitude, latitude pairs)
+            stnPoints = [Point(lon, lat) for lon, lat in zip(processed_df[lon_col], processed_df[lat_col])]
 
-            # Find nearest 5 stations
-            num_nearest = min(5, len(distances_km))
-            nearest_idx = np.argsort(distances_km)[:num_nearest]
-            nearest_data = processed_df.iloc[nearest_idx].copy()
-            distance_calculated = distances_km[nearest_idx]
-            nearest_data['distance'] = distance_calculated
+            # Call getNearestNStnID to find the 5 nearest stations and their weights
+            N = 5
+            idx, orderedStns, orderedDist, orderedWghts , raw_weights = getNearestNStnID(centroid, stnPoints, N, MIN_DISTANCE_THRESHOLD=0.1)
+            # Add the weights to the DataFrame
+            nearest_data = processed_df.iloc[idx].copy()
+            nearest_data['Distance_km'] = orderedDist
+            nearest_data['weight'] = orderedWghts
 
-            # Compute inverse distance weights
-            raw_weights = 1 / np.clip(nearest_data['distance'], 1e-6, 0)
-            normalized_weights = raw_weights / raw_weights.sum()
+            raw_ETo_vals = nearest_data['ETo__in']
 
-            # If a station has zero distance, assign it full weight (ignore others)
-            if (nearest_data['distance'] == 0).any():
-                nearest_data.loc[nearest_data['distance'] == 0, 'weight'] = 1.0
-                nearest_data.loc[nearest_data['distance'] > 0, 'weight'] = 0.0
-            else:
-                nearest_data['weight'] = normalized_weights
-            # Compute weighted ETo
-            weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
+            # Compute weighted ETo (using 'ETo__in' column from the processed data)
+            # weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
+            weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum() / nearest_data['weight'].sum()
+            # weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum() / nearest_data['weight'].sum()
+            # print(f"{nearest_data['ETo__in']} - {nearest_data['weight']} ")
             nearest_data['ETo__in'] = weighted_ETo
             nearest_data['Date'] = current_date
 
-            # Debugging output
             # if debug:
-            #     print(f"\n--- Nearest Stations for Source: {source} on {current_date} ---")
-            #     print(f"{'Distance (km)':<15} {'Raw Weight':<15} {'Normalized Weight':<20} {'Weighted ETo':<15}")
-            #     for idx, row in nearest_data.iterrows():
-            #         print(f" {row['distance']:<15.6f} {row['weight']:<15.6f} {row['weight']:<20.6f} {row['ETo__in']:<15.6f}")
-            #     print(f"Sum of Normalized Weights: {normalized_weights.sum()} (Should be ~1.0)\n")
+                
+            #     print(f"\nNearest 5 stations for {source} on {current_date}:")
+            #     # Print the nearest 5 stations with distance, latitude, and longitude
+            #     for idx in nearest_idx:
+            #         lat = processed_df.iloc[idx][lat_col]
+            #         lon = processed_df.iloc[idx][lon_col]
+            #         distance = distances_km[idx]
+            #     print(f"Station: Lat: {lat}, Lon: {lon} | Latitude: {lat} | Longitude: {lon} | Distance: {distance:.2f} km")
+
+
+            # Debugging output
+            if debug:
+                print(f"\n--- Nearest Stations for Source: {source} on {current_date} ---")
+                print(f"{'Distance (km)':<15} {'RAW Weight':<20} {'Normalized Weight':<20} {'ETo':<20} {'Weighted ETo':<15}")
+                for idx, row in nearest_data.iterrows():
+                    print(f" {nearest_data['Distance_km'].iloc[0]:<15.6f} {raw_weights[0]:<20.6f} {nearest_data['weight'].iloc[0]:<20.6f} {raw_ETo_vals.iloc[0]:<20.6f} {nearest_data['ETo__in'].iloc[0]:<15.6f}")
+                print(f"Sum of Normalized Weights: {nearest_data['weight'].sum()} (Should be ~1.0)\n")
 
             # Store processed data
             all_processed_data.append(nearest_data[['Date', 'ETo__in', 'Wavg', 'Tavg', 'Rnet']])
@@ -5292,6 +5435,7 @@ def getWeatherForGeoid(df, agstack_geoid, debug=True):
     ## Combine all processed data into a final DataFrame
     final_df = pd.concat(all_processed_data, ignore_index=True)
     return final_df
+
 
 
 # def getWeatherForGeoid(df, agstack_geoid, debug=True):  # Add debug flag
@@ -5613,7 +5757,7 @@ def process_noaa_ghcnd(source_df, source):
         # noaa_df['ETo__in'] = df['ETo_AVG_IN']  # Ensure ETo is assigned
 
     # Process for NOAA-FORECAST source
-    if source == 'NOAA-FORECAST' or source == 'NLDAS':
+    if source == 'NOAA-FORECAST':
         noaa_forecast_df['Wavg'] = df['U_z']
         noaa_forecast_df['Rnet'] = df['R_n__MJpm2']
         
@@ -5633,26 +5777,17 @@ def process_noaa_ghcnd(source_df, source):
     return df_final
 
 
-def process_other_region(source_df,source):
-    
-    tavg_ghcnd = 0
-    tavg_ncep = 0
-    ghcnd_df = pd.DatFrame()
-    ncep_df = pd.DataFrame()
-    if source == "GHCND":
-        ghcnd_df['ETo__in'] = source_df['ETo_AVG_IN']
-        ghcnd_df['Wavg'] = source_df['AWND']
-        tavg_ghcnd = source_df['T_mean']
-    if source == 'NCEP' or source == 'NLDAS':
-        tavg_ncep = source_df['T_mean']
-        ncep_df['Rnet'] = getRnet(source_df)
+def process_erra5(source_df,source):
+ 
+    err5_df = pd.DatFrame()
+    if source =='ERRA5':    
+        err5_df['ETo__in'] = source_df['ETo_AVG_IN']
+        err5_df['Wavg'] = source_df['Wavg']
+        err5_df['Tavg'] = source_df['T_mean']
+        err5_df['Rnet'] = source_df['R_n']
         
-    tavg_values = [t for t in [tavg_ghcnd, tavg_ncep] if t is not None]
-    if tavg_values:
-        source_df['Tavg'] = sum(tavg_values) / len(tavg_values)
-        
-    # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([ghcnd_df, ncep_df])
+        # Join all dataframes (adjust if you need to join based on specific keys)
+    df_final = source_df.join([err5_df])
     
     # Check if the required columns exist before printing
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
@@ -5671,10 +5806,10 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
         getWeatherFromNOAAFORECASTED,
         getWeatherFromGHCND,
         getWeatherFromNLDAS,
-        getWeatherFromCIMIS
+        getWeatherFromCIMIS,
+        getWeatherFromERA5
     ]
-    source_names = ['NCEP', 'AUS', 'AUS-FORECASTED', 'NOAA', 'NOAA-FORECAST', 'GHCND', 'NLDAS', 'CIMIS']
-
+    source_names = ['NCEP', 'AUS', 'AUS-FORECASTED', 'NOAA', 'NOAA-FORECAST', 'GHCND', 'NLDAS', 'CIMIS','ERRA5']
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(func, geoid, start_date, end_date): name for func, name in zip(weather_functions, source_names)}
 
@@ -5754,6 +5889,606 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
 
     return result
 
+def calculate_eto(o_df):
+    # print("=======o_df_cols========", o_df.columns.to_list())
+    et1 = ETo()
+    freq = 'D'
+    o_df['elev'] = 0  # Ensure elevation column exists
+
+    # Ensure required columns exist
+    required_columns = ['temperature_2m_max', 'temperature_2m_min', 'Tavg', 'Rnet']
+    if not all(col in o_df.columns for col in required_columns):
+        raise ValueError("Missing required columns in input dataframe")
+    
+    # Rename columns for consistency
+    o_df['T_min'] = o_df['temperature_2m_min']
+    o_df['T_max'] = o_df['temperature_2m_max']
+    o_df['T_mean'] = o_df['Tavg']
+    o_df['R_n'] = o_df['Rnet']
+    
+    # Extract relevant columns
+    p_df = o_df[['Date', 'T_min', 'T_max', 'T_mean', 'R_n', 'latitude', 'longitude', 'elev']].copy()
+    p_df['Date'] = pd.to_datetime(p_df['Date'])
+    
+    eto1_arr, eto2_arr = [], []
+
+    # Iterate over each row in p_df and calculate ETo
+    for i, row in p_df.iterrows():
+        lat_i, lon_i, z_msl_i = row['latitude'], row['longitude'], row['elev']
+        
+        # Create temporary dataframe for current row
+        pp_df = p_df.iloc[[i]].copy()
+        pp_df.set_index('Date', drop=True, inplace=True)
+        pp_df = pp_df.astype(float)
+
+        et1.param_est(pp_df, freq, z_msl_i, lat_i, lon_i)
+        
+        # Get ETo results
+        eto1 = et1.eto_fao()[0]  # FAO method result
+        eto2 = et1.eto_hargreaves()[0]  # Hargreaves method result
+        
+        # Handle NaN and append to results
+        eto1_arr.append(eto1 if not np.isnan(eto1) else 0)
+        eto2_arr.append(eto2 if not np.isnan(eto2) else 0)
+
+    # Average ETo calculation
+    avg_arr = [(eto1_arr[x] + eto2_arr[x]) / 2 for x in range(len(eto1_arr))]
+    
+    # Convert to inches
+    eto1_arr_in = [x / 25.4 for x in eto1_arr]
+    eto2_arr_in = [x / 25.4 for x in eto2_arr]
+    avg_arr_in = [x / 25.4 for x in avg_arr]
+
+    # Store results in p_df
+    p_df['ETo_FAO_MM'] = eto1_arr
+    p_df['ETo_HAR_MM'] = eto2_arr
+    p_df['ETo_AVG_MM'] = avg_arr
+
+    p_df['ETo_FAO_IN'] = eto1_arr_in
+    p_df['ETo_HAR_IN'] = eto2_arr_in
+    p_df['ETo_AVG_IN'] = avg_arr_in
+
+    p_df.reset_index(drop=True, inplace=True)
+
+    # Merge ETo results back into the original DataFrame
+    final_df = pd.merge(o_df, p_df[['Date', 'ETo_FAO_MM', 'ETo_HAR_MM', 'ETo_AVG_MM', 
+                                     'ETo_FAO_IN', 'ETo_HAR_IN', 'ETo_AVG_IN']], on='Date', how='left')
+
+    # Remove duplicate columns
+    final_df = final_df.loc[:, ~final_df.columns.duplicated()]
+
+    columns_to_drop = ['R_n', 'Tavg', 'elev','temperature_2m_max','temperature_2m_min']
+    final_df = final_df.drop(columns=columns_to_drop)
+    return final_df
+
+
+def getWeatherFromERA5(agstack_geoid, start_date,end_date):
+
+    try:
+        # Fetch WKT polygon and extract latitude and longitude
+        wkt_polygon = fetchWKT(agstack_geoid)
+        lat, lon = extractLatLonFromWKT(wkt_polygon)
+        
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start_date,
+            "end_date": end_date,
+            "daily": [
+                "et0_fao_evapotranspiration",
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "windspeed_10m_max",
+                "windspeed_10m_min",
+                "shortwave_radiation_sum",
+                "snowfall_sum"
+            ],
+            "timezone": "auto"
+        }
+
+        # Make the API request
+        response = requests.get(url, params=params)
+
+        # Check if the request was successful
+        if response.status_code != 200:
+            raise Exception(f"Open-Meteo API request failed! HTTP Code: {response.status_code}")
+
+        data = response.json()
+
+        print(data)
+        # print(data)
+        # Ensure the response contains the expected data
+        if "daily" not in data:
+            raise KeyError("The 'daily' key is missing from the API response.")
+
+        # Extract daily data
+        daily_data = data["daily"]
+
+        # Create a DataFrame from the daily data
+        df = pd.DataFrame(daily_data)
+
+        # Convert the 'time' column to datetime
+        df['time'] = pd.to_datetime(df['time'])
+
+        # Calculate Mean Temperature (Tavg) and Mean Wind Speed (Wavg)
+        df['Tavg'] = (df['temperature_2m_max'] + df['temperature_2m_min']) / 2
+        # df['Wavg (m/s)'] = (df['windspeed_10m_max'] + df['windspeed_10m_min']) / 2
+        # Convert windspeed from km/h to m/s before calculating the average
+        df['Wavg'] = ((df['windspeed_10m_max'] / 3.6) + (df['windspeed_10m_min'] / 3.6)) / 2
+        df['snowfall'] = df['snowfall_sum']
+
+        # Rename columns for clarity
+        df.rename(columns={
+            "time": "Date",
+            "et0_fao_evapotranspiration": "ETo",
+            "shortwave_radiation_sum": "Shortwave Radiation (MJ/m²)"
+        }, inplace=True)
+
+
+        df['Rnet'] = df['Shortwave Radiation (MJ/m²)']
+        
+        df['latitude'] = lat
+        df['longitude'] = lon
+
+        # df["ETo"] = (0.0023 * (df["Tavg"] + 17.8) * np.sqrt(df["temperature_2m_max"] - df["temperature_2m_min"]) * (df["Rnet"]))  # Convert energy to mm/day
+        # Select and reorder columns
+        df = df[[
+            "latitude",
+            "longitude",
+            "Date",
+            "ETo",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "Tavg",
+            "Wavg",
+            "Rnet",
+            "snowfall"
+        ]]
+
+        eto_df = calculate_eto(df)
+
+        #Average ETo and ETo_HAR_MM
+        eto_df['ETo'] = (eto_df['ETo'] + eto_df['ETo_HAR_MM']) / 2
+
+        # print(eto_df)
+        return eto_df
+
+    except Exception as e:
+        print(e)
+        return  empty_response()
+        
+def s2_level_centroids(wkt_polygon):
+    polygon = wkt.loads(wkt_polygon)
+    level=15
+
+    bounding_box = polygon.bounds
+    vertices = [LatLng.from_degrees(bounding_box[1], bounding_box[0]), 
+                   LatLng.from_degrees(bounding_box[3], bounding_box[2])]
+    
+    # Use S2RegionCoverer to find covering cells
+    region_coverer = RegionCoverer()
+    region_coverer.min_level = level
+    region_coverer.max_level = level
+    
+    # Cover the bounding box of the polygon
+    rect = LatLngRect.from_point_pair(vertices[0], vertices[1])
+    cell_ids = region_coverer.get_covering(rect)
+    
+
+    # Compute the centroids of the intersecting cells
+    centroids = []
+    for cell_id in cell_ids:
+        #print(cell_ids)
+        cell = Cell(cell_id)
+        centroid = cell.get_center()
+        center_latlng = LatLng.from_point(centroid)
+        centroids.append((center_latlng.lat().degrees, center_latlng.lng().degrees))
+
+    return centroids
+
+def get_historical_crop_data(lat: str, lng: str, forYear: int):
+    x = float(lng)
+    y = float(lat)
+
+    # Convert them to a different projection
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:5070", always_xy=True)
+    try:
+        longitude, latitude = transformer.transform(x, y, errcheck=True)
+        #print(f"Transformed Coordinates: longitude={longitude}, latitude={latitude}")
+    except Exception as e:
+        print(f"Error during transformation: {e}")
+        return None
+
+    # Define API URL and parameters
+    base_url = "https://nassgeodata.gmu.edu/axis2/services/CDLService/GetCDLValue"
+    params = {
+        "year": forYear,
+        "x": longitude,
+        "y": latitude
+    }
+
+    try:
+        # Use requests.get() directly
+        response = requests.get(base_url, params=params)
+        # print(f"Request URL: {response.url}")
+        # print(f"Response Code: {response.status_code}")
+
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Parse XML response
+            data_dict = xmltodict.parse(response.content)
+            result_json = data_dict.get("ns1:GetCDLValueResponse", {}).get("Result", "")
+
+            # Clean and parse the response
+            result_json = result_json.replace("'", "").replace("\"", "")
+            rj = ast.literal_eval(json.dumps(result_json))
+            return rj
+        else:
+            print(f"Error: Received status code {response.status_code}")
+            print(f"Response Content: {response.text}")
+            return None
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+# Soil Properties
+property_dict = {
+	'bdod': 'Bulk density of the fine earth fraction',
+	'cec': 'Cation Exchange Capacity of the soil',
+	'cfvo': 'Volumetric fraction of coarse fragments (> 2 mm)',
+	'clay': 'Proportion of clay particles (< 0.002 mm) in the fine earth fraction',
+	'sand': 'Proportion of sand particles (> 0.05 mm) in the fine earth fraction',
+	'silt': 'Proportion of silt particles (≥ 0.002 mm and ≤ 0.05 mm) in the fine earth fraction',
+	'nitrogen': 'Total nitrogen (N)', 
+	'ocd': 'Organic carbon density',
+	'ocs': 'Organic carbon stocks',
+	'phh2o': 'Soil pH',
+	'soc': 'Soil organic carbon content in the fine earth fraction'
+}
+
+
+def getSoilPropertiesDF(propertyCodeStr, data):
+	
+	allDepth_df = pd.DataFrame()
+
+	#first get the subset by name
+	for i in range(len(data['properties']['layers'])):
+		propName = data['properties']['layers'][i]['name']
+		if (propName==propertyCodeStr):
+			
+			#get the unit measure
+			um = data['properties']['layers'][i]['unit_measure']
+			fac = um['d_factor']
+			unitStr_target = um['target_units']
+			unitStr_mapped = um['mapped_units']
+			
+			
+			data_code = data['properties']['layers'][i]
+			num_depths = len(data_code['depths'])
+			for d in range(num_depths):
+				data_at_depth = data_code['depths'][d]
+				row_label = data_at_depth['label']
+				vals = data_at_depth['values']
+				rng = data_at_depth['range']
+				
+				top_depth = rng['top_depth']
+				bottom_depth = rng['bottom_depth']
+				unit_depth = rng['unit_depth']
+				
+				df = pd.DataFrame(list(vals.values())).T
+				df = df / fac
+				
+				df.columns = list(vals.keys())
+				cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
+				
+				df['Depth'] = row_label
+				df['Top_Depth'] = top_depth
+				df['Botton_Depth'] = bottom_depth
+				df['Units_Depth'] = unit_depth
+				
+				df = df[cols]
+				allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
+				#allDepth_df = allDepth_df.append(df, ignore_index=True)
+		else:
+			continue
+	
+	return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], allDepth_df
+
+
+def getSoilPropertiesDF2(propertyCodeStr, data):
+	
+	allDepth_df = pd.DataFrame()
+
+	#first get the subset by name
+	for i in range(len(data['properties']['layers'])):
+		propName = data['properties']['layers'][i]['name']
+		if (propName==propertyCodeStr):
+			
+			#get the unit measure
+			um = data['properties']['layers'][i]['unit_measure']
+			fac = um['d_factor']
+			unitStr_target = um['target_units']
+			unitStr_mapped = um['mapped_units']
+			
+			
+			data_code = data['properties']['layers'][i]
+			num_depths = len(data_code['depths'])
+			for d in range(num_depths):
+				data_at_depth = data_code['depths'][d]
+				row_label = data_at_depth['label']
+				vals = data_at_depth['values']
+				rng = data_at_depth['range']
+				
+				top_depth = rng['top_depth']
+				bottom_depth = rng['bottom_depth']
+				unit_depth = rng['unit_depth']
+				
+				df = pd.DataFrame(list(vals.values())).T
+				df = df / fac
+				
+				df.columns = list(vals.keys())
+				cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
+				
+				df['Depth'] = row_label
+				df['Top_Depth'] = top_depth
+				df['Botton_Depth'] = bottom_depth
+				df['Units_Depth'] = unit_depth
+				
+				df = df[cols]
+				allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
+				#allDepth_df = allDepth_df.append(df, ignore_index=True)
+		else:
+			continue
+	
+	#fix the allDepth_df
+	df = allDepth_df[['Depth','mean']]
+	df = df.rename(columns={'mean':propertyCodeStr})
+	df = df.drop(columns=['Depth'], axis=1)
+	
+	return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], df
+
+
+def getKsatMean(silt, sand, clay, BD):
+	#, OC, PD, MC):
+	#PD = Particle density
+	#MC = Moisture Content
+	#https://www.researchgate.net/figure/Saturated-hydraulic-conductivity-of-soil-as-influenced-by-per-cent-silt-th-clay-content-in_fig2_248885151
+
+	#https://www.tandfonline.com/doi/full/10.1080/24749508.2018.1481633
+	#EIR = -30,578.81–305.56(sand%)-306.16(silt%)-0.306.33(clay%)-5.18(BD%)+.34(MC%)+4.18(PD)+16.85(OC%)
+
+	#https://essd.copernicus.org/preprints/essd-2020-149/essd-2020-149.pdf
+	#log(Ksat) = b0 + b1 · BD + b2 · BD2 + b3 · CL + b4 · BD · CL + b5 · CL2 + b6 · SA + b7 · BD · SA + b8 · CL · SA + b9 · SA2
+	if not silt.index.name=='Depth':
+		silt.set_index('Depth', drop=True, inplace=True)
+	
+	silt = silt[['mean']]
+	silt = silt.astype('float')
+
+	if not clay.index.name=='Depth':
+		clay.set_index('Depth', drop=True, inplace=True)
+	clay = clay[['mean']]
+	clay = clay.astype('float')
+
+	if not sand.index.name=='Depth':
+		sand.set_index('Depth', drop=True, inplace=True)
+	sand = sand[['mean']]
+	sand = sand.astype('float')
+
+	if not BD.index.name=='Depth':
+		BD.set_index('Depth', drop=True, inplace=True)
+	BD = BD[['mean']]
+	BD = BD.astype('float')
+
+	b0=2.17
+	b1=0.9387
+	b2=-0.8026
+	b3=0.0037
+	b4=-0.017
+	b5=0
+	b6=0.0025
+	b7=0
+	b8=0
+	b9=0
+	#Ksat is in cm/day, clay (CL) and sand (SA) are expressed in % and bulk density (BD) is in g/cm3 or kg/dm3
+	log_Ksat = b0 + b1*BD + b2*BD.pow(2) + b3*clay + b4*BD*clay + b5*clay.pow(2) + b6*sand + b7*BD*sand + b8*clay*sand + b9*sand.pow(2)
+	log_Ksat = log_Ksat[['mean']]
+	Ksat = log_Ksat.apply(lambda x: np.exp(x))
+	Ksat.rename(columns = {'mean':'Ksat'}, inplace=True)
+	units = 'cm/day'
+	
+	#Convert to inches / hr
+	Ksat_inchesPerHr = Ksat * 0.0164042
+	units_inchesPerHr = 'in/hr'
+
+	return units_inchesPerHr, Ksat_inchesPerHr, 'Saturated hydraulic conductivity'
+
+def getAWCMean(silt, clay, BD):
+	#https://journals.lww.com/soilsci/Abstract/1985/07000/Estimating_Available_Water_Holding_Capacity_of.7.aspx#:~:text=Available%20water%2Dstorage%20capacity%20(AWSC,(r2%20%3D%200.92)%3A%20AWSCcore%20%3D
+	if not silt.index.name=='Depth':
+		silt.set_index('Depth', drop=True, inplace=True)
+	silt = silt[['mean']]
+	silt = silt.astype('float')
+	
+	if not clay.index.name=='Depth':
+		clay.set_index('Depth', drop=True, inplace=True)
+	clay = clay[['mean']]
+	clay = clay.astype('float')
+	
+	if not BD.index.name=='Depth':
+		BD.set_index('Depth', drop=True, inplace=True)
+	BD = BD[['mean']]
+	BD = BD.astype('float')
+	
+	AWSC = 14.01 + 0.03*(silt * clay) - 8.78*BD
+	AWSC.rename(columns={'mean':'AWSC'}, inplace=True)
+	AWSC = AWSC.round(2)
+	#units are %Volume
+	unitsStr = '%vol [volume-fraction]'
+	
+	return unitsStr, AWSC, 'Available water holding capacity'
+
+
+def getPropertiesDF(lat,lon):
+	
+	#API call for the details about a point
+	"""
+	Query a single pixel point on the soilgrids stack, returning a GeoJSON
+	layer: soilgrids layer name to be queried
+	depth: specific depth to be queried
+	values: statistical values Optional[List] = LayerQuery
+	"""
+	
+	#API #2 is meta data
+	url_layers = 'https://rest.isric.org/soilgrids/v2.0/properties/layers'
+	with urllib.request.urlopen(url_layers) as response:
+		layer_data = json.load(response)
+	#get the list of properties
+	propertiesList = []
+	length = len(layer_data['layers'])
+	for idx in range(length):
+		p = layer_data['layers'][idx]['property']
+		propertiesList.append(p)
+	
+	
+	#to get the meta data for any property
+	depths=[]
+	values = []
+	#modify the property list
+	propertiesList = ['bdod',
+	 'cec',
+	 'cfvo',
+	 'soc',
+	 'nitrogen',
+	 'ocd',
+	 'phh2o',
+	 'clay',
+	 'sand',
+	 'silt']
+	
+	prop_to_find = 'nitrogen'
+	for idx in range(length):
+		p = layer_data['layers'][idx]['property']
+		if (p==prop_to_find):
+			info = layer_data['layers'][idx]['layer_structure']
+			for i in range(len(info)):
+				depths.append(info[i]['range'])
+				values.append(info[i]['values'])
+	valuesList = values[1]
+	prop_url = ''
+	for p in propertiesList:
+		prop_url = prop_url + '&property='+str(p)
+
+	value_url = ''
+	valuesList=['mean']
+	for v in valuesList:
+		value_url = value_url + '&value='+str(v)
+
+	depth_url = ''
+	depths=['0-5cm']
+	for d in depths:
+		depth_url = depth_url + '&depth='+str(d)
+
+	main_url = 'https://rest.isric.org/soilgrids/v2.0/properties/query?' + 'lon='+str(lon)+'&lat='+str(lat)
+	url_details = main_url + prop_url + depth_url + value_url
+	with urllib.request.urlopen(url_details) as response:
+		data = json.load(response) 
+
+	
+
+	propertyResult = pd.DataFrame()
+	i=0
+	for p in propertiesList:
+		prop_mean_value = getSoilPropertiesDF2(p, data)[1].iloc[0][0]
+		prop_units = getSoilPropertiesDF2(p, data)[0][2]
+		prop_desc = getSoilPropertiesDF2(p, data)[0][4]
+		propertyResult.loc[i,'Name']=p
+		propertyResult.loc[i,'Mean Value in Top-Soil']=prop_mean_value
+		propertyResult.loc[i,'Units']=prop_units
+		propertyResult.loc[i,'Description']=prop_desc
+		i=i+1
+
+	#Lets; do KSat
+	ksat_tuple = getKsatMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('sand', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
+	
+	nameStr = ksat_tuple[1].columns.tolist()[0]
+	valStr = ksat_tuple[1].iloc[0][0]
+	unitsStr = ksat_tuple[0]
+	descStr = ksat_tuple[2]
+	propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
+
+	#Now let's do AWC
+	awc_tuple = getAWCMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
+	nameStr = awc_tuple[1].columns.tolist()[0]
+	valStr = awc_tuple[1].iloc[0][0]
+	unitsStr = awc_tuple[0]
+	descStr = awc_tuple[2]
+	propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
+	
+	renamedCols = ['Acronym', 'Mean Value in Top-Soil', 'Units', 'Property']
+	propertyResult.columns=renamedCols
+	subsetCols = ['Property', 'Mean Value in Top-Soil', 'Units']
+	propertyResult = propertyResult[subsetCols]
+	
+	#round to 2 decimal places for Mean Value
+	propertyResult['Mean Value in Top-Soil'] = propertyResult['Mean Value in Top-Soil'].round(2)
+	
+	return propertyResult
+
+def getSoilProperties(geoid):
+	asset_registry_base = "https://api-ar.agstack.org"
+	res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
+	field_wkt = res['WKT']
+	p = shapely.wkt.loads(field_wkt)
+	c = p.centroid
+	df = getPropertiesDF(c.y,c.x)
+	return df
+
+    
+
+def get_historical_crop_for_geoid(geoid,start_year,end_year):
+    #get the wkt
+    asset_registry_base = "https://api-ar.agstack.org"
+    res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
+    wkt = res['WKT']
+
+    # print("=======wkt======",wkt)
+
+    crop_hist = {}
+    cropType = pd.DataFrame(columns=['Year', 'Crop'])
+    for i in range(end_year-start_year+1):
+        forYear = start_year+i
+        centroids = s2_level_centroids(wkt)
+        # print("=====centroids=====",centroids)
+
+        for j in range(len(centroids)):
+            centroid = centroids[j]
+            lat = centroid[0]
+            lng = centroid[1]
+            # print("===lat====lng====",lat,lng)
+            resp = get_historical_crop_data(lat, lng, forYear)
+            # print("===resp========",resp)
+            tokenList = resp.split(',')
+            #print(tokenList)
+            resp_dict = {}
+            for k in range(len(tokenList)):
+                tok = tokenList[k]
+                keyValueToks = tok.split(':')
+                key = keyValueToks[0].strip().replace('{','').replace('}','')
+                val = keyValueToks[1].strip().replace('{','').replace('}','')
+                resp_dict[key]=val
+            crop = resp_dict["category"]
+            crop_hist['year']=forYear
+            crop_hist['crop']=crop
+            #print(crop_hist)
+            cropType.loc[i,'Year']=forYear
+            cropType.loc[i,'Crop']=crop
+
+    return cropType
+
+
 def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
     response_dict = {}
 
@@ -5798,9 +6533,6 @@ def getETFn(geoid: str, start_date: str, end_date: str = None) -> dict:
     et_result_df = et.generateET(final_df)
     # Return the DataFrame with 'Date' as index and 'ETa__in' column
     return et_result_df.to_dict(orient='index')
-
-  
-import psycopg2
 
 DB_CONFIG = {
     "dbname": "terrapipe_backend",
@@ -6745,6 +7477,93 @@ def getEtoFromWeatherEtc():
                 
         }
     
+    return jsonify(response)
+
+@app.route('/getERA5')
+def getERA5Data():
+    geoid = request.args['geoid']
+
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date',None)
+    
+    if end_date is not None :
+
+        weather_df = getWeatherFromERA5(geoid, start_date, end_date)
+    else:
+        weather_df = getWeatherFromERA5(geoid, start_date, end_date=None)
+    
+    try:
+        weather_df.reset_index(inplace=True)
+    except:
+
+        pass
+
+    # Convert DataFrame to a dictionary
+    json_data = weather_df.to_dict(orient='records')
+
+    response = {
+        "data": json_data,
+        "metadata": get_era5_metadata(),
+        "metadata-description":get_era5_metadata_description()
+    }
+
+    return jsonify(response)
+
+usa_gdf = world_gdf[world_gdf['FORMAL_EN'].str.contains('United States of America', case=False, na=False)].reset_index()
+
+def getRegionForCrop(geoid):
+    #get the polygon and its centroid
+
+    if (usa_gdf.contains(getCentroidforGeoid(geoid))[0]): #point is within the US
+        return 'USA'
+    else:
+        return 'OTHER'
+
+@app.route('/get-crop-data', methods=['GET'])
+def get_crop_data():
+
+    geoid = request.args.get('geoid')
+    start_year = int(request.args.get('start_year'))
+    end_year = int(request.args.get('end_year'))
+
+    if not geoid or not start_year or not end_year:
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    # Check if geoid belongs to USA
+    region = getRegionForCrop(geoid)
+    if region != 'USA':
+        return jsonify({
+            "error": "Given geoid does not belong to the USA. Currently, we have data only for the USA."
+        }), 400
+
+    crop_data = get_historical_crop_for_geoid(geoid, start_year, end_year)
+    
+    crop_data = crop_data.to_dict(orient='records')
+
+    response = {
+        "data": crop_data,
+        "metadata": crop_data_metadata(),
+        "metadata-description": crop_data_metadata_description()
+    }
+
+    return jsonify(response)
+
+
+@app.route('/getSoilProperties', methods=['GET'])
+def getSoilPropertiesdata():
+
+    geoid = request.args.get('geoid')
+
+    soil_data = getSoilProperties(geoid)
+    
+    soil_data = soil_data.to_dict(orient='records')
+
+    response = {
+        "data": soil_data,
+        "metadata": soil_properties_metadata(),
+        "metadata-description": soil_properties_metadata_description()
+    }
+
     return jsonify(response)
 
 @app.route('/getEtoByDate')
