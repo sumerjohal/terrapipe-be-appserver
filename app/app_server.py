@@ -5078,7 +5078,7 @@ def getWeatherFromJRC(agstack_geoid):
 def weatherMetadata():
     metadata = {
         "Date": "datetime (UTC)",
-        "Tavg": "K",
+        "Tavg": "°C",
         "ETo__in":"inches",
         "Wavg":"m/s"
     }
@@ -5244,9 +5244,138 @@ def normalize_weights(weights):
         return np.zeros_like(weights)
     return weights / total_weight
 
-def getNearestNStnID(c, stnPoints, N, MIN_DISTANCE_THRESHOLD=100):
+
+# def getWeatherForGeoid(df, agstack_geoid, debug=True):
+#     """Process weather data for a specific geoid location."""
+
+#     # Get the region for the given geoid
+#     region = getRegion(agstack_geoid)
+#     print(region)
+#     if debug:
+#         print(f'Region: {region}')
+
+#     # Retrieve region-specific configuration
+#     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
+
+#     # Define required columns in the output
+#     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
+
+#     # Return empty DataFrame if input is empty
+#     if df.empty or not set(['Year', 'Month', 'Day']).issubset(df.columns):
+#         return pd.DataFrame(columns=required_columns + ['Date'])
+
+#     # Convert to Date column
+#     try:
+#         df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
+#         df = df.dropna(subset=['Date'])  # Drop invalid dates
+#     except KeyError:
+#         if 'TS' in df.columns:
+#             df['Date'] = df['TS']
+#         else:
+#             return pd.DataFrame(columns=required_columns + ['Date'])
+
+#     # Remove duplicate dates and reindex
+#     if not df['Date'].empty:
+#         df = df.drop_duplicates(subset='Date')
+#         df = df.set_index('Date').reindex(
+#             pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')
+#         ).reset_index().rename(columns={'index': 'Date'})
+#         df = df.interpolate(method='linear')
+
+#     # List for processed data
+#     all_processed_data = []
+
+#     # Iterate over unique dates
+#     for current_date in df['Date'].unique():
+#         date_data = df[df['Date'] == current_date]
+#         if date_data.empty or 'source' not in date_data.columns:
+#             continue
+
+#         # Iterate over sources
+#         for source in date_data['source'].unique():
+#             source_df = date_data[date_data['source'] == source]
+#             if source_df.empty:
+#                 continue
+            
+#              # Process data based on region
+#             if region == 'AUS' and source in ['AUS', 'AUS-FORECASTED', 'CIMIS']:
+                
+#                 # print(f"Total stations before filtering: {df[['lat', 'lon']].drop_duplicates().shape[0]}")
+#                 # print(f"Total stations after filtering by date ({current_date}): {date_data[['lat', 'lon']].drop_duplicates().shape[0]}")
+#                 # print(f"Total stations after filtering by source ({source}): {date_data[['lat', 'lon']].drop_duplicates().shape[0]}")
+#                 processed_df = process_aus(source_df, source)
+#             elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
+#                 processed_df = process_cimis_noaa(source_df)
+#             elif region == 'USA-!CA':
+#                 processed_df = process_noaa_ghcnd(source_df, source)
+#             elif region == 'OTHER' and source in ['ERRA5']:
+#                 processed_df = process_erra5(source_df)
+#             else:
+#                 continue
+
+#             # Ensure required columns exist
+#             for col in required_columns:
+#                 if col not in processed_df.columns:
+#                     processed_df[col] = 0.0
+
+#             # Extract geoid coordinates
+#             wkt = fetchWKT(agstack_geoid)
+#             polygon = loads(wkt)
+#             centroid = polygon.centroid
+#             # geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
+
+#             # Identify latitude/longitude columns
+#             lon_col = next((col for col in ['lon', 'longitude'] if col in processed_df.columns), None)
+#             lat_col = next((col for col in ['lat', 'latitude'] if col in processed_df.columns), None)
+
+#             if not lon_col or not lat_col:
+#                 if debug:
+#                     print(f"Missing coordinates for {source} data")
+#                 continue
+#             print(processed_df[['Date', 'ETo__in', 'Wavg', 'Tavg', 'Rnet']])
+#             # Get the station points (longitude, latitude pairs)
+#             stnPoints = [Point(lon, lat) for lon, lat in zip(processed_df[lon_col], processed_df[lat_col])]
+#             # print(f"Computed Centroid: {centroid}")
+#             # print(f"Total Available Station Points: {len(stnPoints)}")
+#             # print(f"First 5 Stations: {stnPoints[:5]}")
+
+#             # Call getNearestNStnID to find the 5 nearest stations and their weights
+#             N = 5
+
+#             idx, orderedStns, orderedDist, orderedWghts , raw_weights = getNearestNStnID(centroid, stnPoints, N)
+#             # Add the weights to the DataFrame
+#             nearest_data = processed_df.iloc[idx].copy()
+#             nearest_data['Distance_km'] = orderedDist
+#             nearest_data['weight'] = orderedWghts
+
+#             raw_ETo_vals = nearest_data['ETo__in']
+
+#             # Compute weighted ETo (using 'ETo__in' column from the processed data)
+#             weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
+#             nearest_data['ETo__in'] = weighted_ETo
+#             nearest_data['Date'] = current_date
+
+#             # Debugging output
+#             # if debug:
+#             #     print(f"\n--- Nearest Stations for Source: {source} on {current_date} ---")
+#             #     print(f"{'Distance (km)':<15} {'RAW Weight':<20} {'Normalized Weight':<20} {'ETo':<20} {'Weighted ETo':<15}")
+#             #     for i in range(len(orderedStns)):
+#             #         print(f" {orderedDist[i]:<15.6f} {raw_weights[i]:<20.6f} {orderedWghts[i]:<20.6f} {raw_ETo_vals.iloc[i]:<20.6f} {nearest_data['ETo__in'].iloc[i]:<15.6f}")
+#                 # print(f"Sum of Normalized Weights: {sum(orderedWghts)} (Should be ~1.0)\n")
+#             # Store processed data
+            
+    
+#         ## If no data was processed, return an empty DataFrame
+#         if not all_processed_data:
+#             return pd.DataFrame(columns=required_columns + ['Date'])
+    
+#     ## Combine all processed data into a final DataFrame
+#     final_df = pd.concat(all_processed_data, ignore_index=True)
+#     return final_df
+
+def getNearestNStnID(c, stnPoints, N):
     """
-    Finds the N nearest station points to the centroid `c` with a threshold to remove very close stations.
+    Finds the N nearest station points to the centroid `c` and calculates inverse distance weights.
     
     Arguments:
     - c : Point
@@ -5254,396 +5383,248 @@ def getNearestNStnID(c, stnPoints, N, MIN_DISTANCE_THRESHOLD=100):
     - stnPoints : list of Point
         List of station points (using shapely.geometry Point).
     - N : int
-        The number of nearest stations to return.
-    - MIN_DISTANCE_THRESHOLD : float
-        Minimum distance to filter out very close stations. Default is 100 meters.
+        Number of nearest stations to return.
     
     Returns:
     - list : [indices, ordered stations, ordered distances, ordered weights, raw weights]
     """
 
-    dist = []
-    filtered_stnPoints = []
+    # print(f"Total station points available: {len(stnPoints)}")
+    # print(f"Requested N: {N}")
+    if len(stnPoints) == 1:
+        N = min(5, len(stnPoints))  # Ensure we don't request more stations than available
+    if not stnPoints:
+        print("No station points available!")
+        return [[], [], [], [], []]
 
-    # Step 1: Calculate distances from centroid to each station point
-    for p in stnPoints:
-        d = float(c.distance(p))
-        if d == 0:
-            d = 0.000001  # Avoid division by zero or zero distance
-        dist.append(d)
+    dist = [(i, float(c.distance(p)), p) for i, p in enumerate(stnPoints)]
 
-        # Step 2: Apply filtering based on MIN_DISTANCE_THRESHOLD
-        if all(p.distance(existing) > MIN_DISTANCE_THRESHOLD for existing in filtered_stnPoints):
-            filtered_stnPoints.append(p)
+    # Sort by distance (ascending order)
+    dist.sort(key=lambda x: x[1])
 
-    # Step 3: Sort distances and select the N nearest stations
-    idx = np.array([i[0] for i in sorted(enumerate(dist), key=lambda x: x[1])[:N]])
+    # Pick exactly N nearest stations
+    idx, orderedDist, orderedStns = [], [], []
+    for i, d, p in dist[:N]:  
+        idx.append(i)
+        orderedStns.append(p)
+        orderedDist.append(d)
 
-    # Step 4: Adjust N if there are fewer stations than requested
-    M = min(N, len(filtered_stnPoints))  # Ensure we don't exceed available points
-    idx = idx[:M]  # Only use the first M indices
+    # print(f"Number of stations selected: {len(orderedStns)}")
+    # print(f"Distances of selected stations: {orderedDist}")
 
-    # Step 5: Order stations and distances by the sorted indices
-    orderedStns = [filtered_stnPoints[i] for i in idx]
-    orderedDist = [dist[i] for i in idx]
+    if not orderedStns:
+        return [[], [], [], [], []]
 
-    # Step 6: Calculate inverse distance weights (1/distance)
-    rawWghts = []
-    invDist = [1/d for d in orderedDist if d != 0]  # Avoid division by zero
-    den = sum(invDist)
-    rawWghts = invDist  # Raw weights (inverse distances)
-    
-    # Step 7: Normalize the weights
-    orderedWghts = [w / den for w in rawWghts]
+    # Compute inverse distance weights (avoid division by zero)
+    invDist = [1/d if d > 0 else 1e6 for d in orderedDist]
+    sum_invDist = sum(invDist)
 
-    # Step 8: Return both the normalized weights and the raw weights
-    return [idx, orderedStns, orderedDist, orderedWghts, rawWghts]
+    # Normalize the weights
+    orderedWghts = [w / sum(invDist) for w in invDist] if sum(invDist) > 0 else [0] * len(invDist)    
+
+    return [idx, orderedStns, orderedDist, orderedWghts, invDist]
+
+def calculate_weighted_Eto(df, centroid, stnPoints, N, current_date):
+    # Call getNearestNStnID to find the 5 nearest stations and their weights
+    N = 5
+    idx, orderedStns, orderedDist, orderedWghts, raw_weights = getNearestNStnID(centroid, stnPoints, N)
+
+    # Extract nearest data
+    nearest_data = df.iloc[idx].copy()
+    nearest_data['Distance_km'] = orderedDist
+    nearest_data['Raw_weight'] = raw_weights
+    nearest_data['weight'] = orderedWghts
+
+    # Determine the correct ETo column
+    eto_col = None
+    for col in ['ETo_AVG_IN', 'ETo_average_inches', 'HlyEto']:
+        if col in nearest_data.columns:
+            eto_col = col
+            break
+
+    if eto_col is None:
+        raise KeyError("No valid ETo column found in nearest_data:", nearest_data.columns)
+
+    # Compute weighted ETo
+    weighted_ETo = (nearest_data[eto_col] * nearest_data['weight']).sum()
+    nearest_data['ETo__in'] = weighted_ETo
+    nearest_data['Date'] = current_date
+
+    # # Debugging output
+    # table_data = {
+    #     "Distance (km)": nearest_data["Distance_km"],
+    #     "RAW Weight": nearest_data["Raw_weight"],
+    #     "Normalized Weight": nearest_data["weight"],
+    #     "ETo": nearest_data[eto_col],
+    #     "Weighted ETo": nearest_data["ETo__in"],
+    #     "date": current_date
+    # }
+
+    # df_table = pd.DataFrame(table_data)
+    # print(f"\n--- Nearest Stations on {current_date} ---\n")
+    # print(df_table.to_string(index=False))  # Neatly formatted output
+
+    return nearest_data
 
 
-
-def getWeatherForGeoid(df, agstack_geoid, debug=True):
-    """Process weather data for a specific geoid location."""
-
-    # Get the region for the given geoid
+def getWeatherForGeoid(df, agstack_geoid, debug=True):  # Add debug flag
+    """Process weather data with the specified data flow"""
     region = getRegion(agstack_geoid)
-    print(region)
     if debug:
-        print(f'Region: {region}')
-
-    # Retrieve region-specific configuration
+        print(f'region--{region}')
+        
     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
-
-    # Define required columns in the output
     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
 
-    # Return empty DataFrame if input is empty
-    if df.empty or not set(['Year', 'Month', 'Day']).issubset(df.columns):
+    if df.empty:
         return pd.DataFrame(columns=required_columns + ['Date'])
 
-    # Convert to Date column
     try:
         df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
-        df = df.dropna(subset=['Date'])  # Drop invalid dates
-    except KeyError:
-        if 'TS' in df.columns:
+    except:
+        try:
             df['Date'] = df['TS']
-        else:
-            return pd.DataFrame(columns=required_columns + ['Date'])
+        except: 
+            pass
 
-    # Remove duplicate dates and reindex
-    if not df['Date'].empty:
-        df = df.drop_duplicates(subset='Date')
-        df = df.set_index('Date').reindex(
-            pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')
-        ).reset_index().rename(columns={'index': 'Date'})
-        df = df.interpolate(method='linear')
-
-    # List for processed data
-    all_processed_data = []
-
-    # Iterate over unique dates
-    for current_date in df['Date'].unique():
+    df = df.drop_duplicates(subset='Date')
+    df = df.set_index('Date').reindex(pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')).reset_index().rename(columns={'index': 'Date'})
+    df = df.interpolate(method='linear')
+    lon_col = 'lon' if 'lon' in df.columns else 'longitude' if 'longitude' in df.columns else None
+    lat_col = 'lat' if 'lat' in df.columns else 'latitude' if 'latitude' in df.columns else None
+     # Use set to remove duplicate points
+    stnPoints = list({Point(lon, lat) for lon, lat in zip(df[lon_col], df[lat_col])})
+    # wkt = fetchWKT(agstack_geoid)
+    # polygon = loads(wkt)
+    
+    
+    def process_date(current_date):
         date_data = df[df['Date'] == current_date]
-        if date_data.empty or 'source' not in date_data.columns:
-            continue
-
-        # Iterate over sources
+        if date_data.empty:
+            return None
+        N = 5
+        source_records = []
         for source in date_data['source'].unique():
             source_df = date_data[date_data['source'] == source]
+            centroid = Point(source_df[source_df['Date'] == current_date][[lon_col, lat_col]].mean())  # Dynamic centroid
+            weighted_df = calculate_weighted_Eto(df ,centroid, stnPoints, N,current_date)
+            source_df = source_df.merge(weighted_df[['Date', 'ETo__in']], on='Date', how='left')
+            source_df.rename(columns={'ETo__in': 'ETo_weighted'}, inplace=True)
             if source_df.empty:
                 continue
-
-            # Process data based on region
-            if region == 'AUS' and source in ['AUS', 'AUS-FORECASTED', 'CIMIS']:
+            
+            # Process source-specific data
+            if region == 'AUS' and source in ['AUS', 'AUS-FORECASTED', 'CIMIS','ERRA5']:
+        
                 processed_df = process_aus(source_df, source)
             elif region == 'USA-CA' and source in ['CIMIS', 'NOAA']:
                 processed_df = process_cimis_noaa(source_df)
-            elif region == 'USA-!CA':
+            elif region == 'USA-!CA' and source in ['GHCND','NOAA','NOAA-FORECAST','ERRA5']:
                 processed_df = process_noaa_ghcnd(source_df, source)
             elif region == 'OTHER' and source in ['ERRA5']:
-                processed_df = process_erra5(source_df)
+                processed_df = process_erra5(source_df,source)
             else:
                 continue
-
+            
             # Ensure required columns exist
             for col in required_columns:
                 if col not in processed_df.columns:
                     processed_df[col] = 0.0
-
-            # Extract geoid coordinates
-            wkt = fetchWKT(agstack_geoid)
-            polygon = loads(wkt)
-            centroid = polygon.centroid
-            # geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
-
-            # Identify latitude/longitude columns
-            lon_col = next((col for col in ['lon', 'longitude'] if col in processed_df.columns), None)
-            lat_col = next((col for col in ['lat', 'latitude'] if col in processed_df.columns), None)
-
+            
             if not lon_col or not lat_col:
                 if debug:
                     print(f"Missing coordinates for {source} data")
                 continue
-
-            # Get the station points (longitude, latitude pairs)
-            stnPoints = [Point(lon, lat) for lon, lat in zip(processed_df[lon_col], processed_df[lat_col])]
-
-            # Call getNearestNStnID to find the 5 nearest stations and their weights
-            N = 5
-            idx, orderedStns, orderedDist, orderedWghts , raw_weights = getNearestNStnID(centroid, stnPoints, N, MIN_DISTANCE_THRESHOLD=0.1)
-            # Add the weights to the DataFrame
-            nearest_data = processed_df.iloc[idx].copy()
-            nearest_data['Distance_km'] = orderedDist
-            nearest_data['weight'] = orderedWghts
-
-            raw_ETo_vals = nearest_data['ETo__in']
-
-            # Compute weighted ETo (using 'ETo__in' column from the processed data)
-            # weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum()
-            weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum() / nearest_data['weight'].sum()
-            # weighted_ETo = (nearest_data['ETo__in'] * nearest_data['weight']).sum() / nearest_data['weight'].sum()
-            # print(f"{nearest_data['ETo__in']} - {nearest_data['weight']} ")
-            nearest_data['ETo__in'] = weighted_ETo
-            nearest_data['Date'] = current_date
-
-            # if debug:
                 
-            #     print(f"\nNearest 5 stations for {source} on {current_date}:")
-            #     # Print the nearest 5 stations with distance, latitude, and longitude
-            #     for idx in nearest_idx:
-            #         lat = processed_df.iloc[idx][lat_col]
-            #         lon = processed_df.iloc[idx][lon_col]
-            #         distance = distances_km[idx]
-            #     print(f"Station: Lat: {lat}, Lon: {lon} | Latitude: {lat} | Longitude: {lon} | Distance: {distance:.2f} km")
-
-
-            # Debugging output
-            if debug:
-                print(f"\n--- Nearest Stations for Source: {source} on {current_date} ---")
-                print(f"{'Distance (km)':<15} {'RAW Weight':<20} {'Normalized Weight':<20} {'ETo':<20} {'Weighted ETo':<15}")
-                for idx, row in nearest_data.iterrows():
-                    print(f" {nearest_data['Distance_km'].iloc[0]:<15.6f} {raw_weights[0]:<20.6f} {nearest_data['weight'].iloc[0]:<20.6f} {raw_ETo_vals.iloc[0]:<20.6f} {nearest_data['ETo__in'].iloc[0]:<15.6f}")
-                print(f"Sum of Normalized Weights: {nearest_data['weight'].sum()} (Should be ~1.0)\n")
-
             # Store processed data
-            all_processed_data.append(nearest_data[['Date', 'ETo__in', 'Wavg', 'Tavg', 'Rnet']])
-    
-    ## If no data was processed, return an empty DataFrame
-    if not all_processed_data:
-        return pd.DataFrame(columns=required_columns + ['Date'])
-    
-    ## Combine all processed data into a final DataFrame
-    final_df = pd.concat(all_processed_data, ignore_index=True)
-    return final_df
+            source_records.extend(processed_df.to_dict('records'))
 
+        if not source_records:
+            return None
 
-
-# def getWeatherForGeoid(df, agstack_geoid, debug=True):  # Add debug flag
-#     """Process weather data with the specified data flow"""
-#     region = getRegion(agstack_geoid)
-#     if debug:
-#         print(f'region--{region}')
+        # Convert to DataFrame for easier processing
+        source_df = pd.DataFrame(source_records)
         
-#     config = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])
-#     required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
-
-#     if df.empty:
-#         return pd.DataFrame(columns=required_columns + ['Date'])
-
-#     try:
-#         df['Date'] = pd.to_datetime(df[['Year', 'Month', 'Day']], errors='coerce')
-#     except:
-#         df['Date'] = df['TS']
-
-#     df = df.drop_duplicates(subset='Date')
-#     df = df.set_index('Date').reindex(pd.date_range(df['Date'].min(), df['Date'].max(), freq='D')).reset_index().rename(columns={'index': 'Date'})
-#     df = df.interpolate(method='linear')
-
-#     def process_date(current_date):
-#         date_data = df[df['Date'] == current_date]
-#         if date_data.empty:
-#             return None
-
-#         source_records = []
-#         for source in date_data['source'].unique():
-#             source_df = date_data[date_data['source'] == source]
-#             if source_df.empty:
-#                 continue
-            
-#             # Process source-specific data
-#             if region == 'AUS':
-#                 processed_df = process_aus(source_df, source)
-#             else:
-#                 continue
-            
-#             # Ensure required columns exist
-#             for col in required_columns:
-#                 if col not in processed_df.columns:
-#                     processed_df[col] = 0.0
-
-#             wkt = fetchWKT(agstack_geoid)
-#             geoid_lat, geoid_lon = extractLatLonFromWKT(wkt)
-
-#             lon_col = 'lon' if 'lon' in processed_df.columns else 'longitude' if 'longitude' in processed_df.columns else None
-#             lat_col = 'lat' if 'lat' in processed_df.columns else 'latitude' if 'latitude' in processed_df.columns else None
-            
-#             if not lon_col or not lat_col:
-#                 if debug:
-#                     print(f"Missing coordinates for {source} data")
-#                 continue
-
-#             distances_km = [geodesic((lat, lon), (geoid_lat, geoid_lon)).km for lat, lon in zip(processed_df[lat_col], processed_df[lon_col])]
-#             nearest_idx = np.argsort(distances_km)[:5]
-#             print(f'nearest_idx --{nearest_idx}')
-            
-#             nearest_data = processed_df.iloc[nearest_idx].copy()
-
-#             nearest_data['distance'] = np.array(distances_km)[nearest_idx]
-
-#             raw_weights = 1 / (nearest_data['distance'] + 1e-6)
-#             # Print all weights at once
-#             print(f"raw_weights:\n{raw_weights}\n source -{source}")
-#             normalized_weights = normalize_weights(raw_weights)
-#             print(f"normalized_weights:\n{normalized_weights}\n source -{source}")
-#             print(f"Sum of Normalized Weights: {normalized_weights.sum()}\n source -{source}")  # Should be 1
-#             nearest_data['weight'] = normalized_weights
-#             nearest_data['weighted_ETo'] = nearest_data['ETo__in'] * nearest_data['weight']
-#             nearest_data['Date'] = current_date
-#             # for idx, (eto, norm_weight, weighted_eto) in enumerate(zip(nearest_data['ETo__in'], normalized_weights, nearest_data['weighted_ETo'])):
-#             #     print(f"Station {idx} (Source: {source}): ETo = {eto:.6f}, Normalized Weight = {norm_weight:.6f}, Weighted ETo = {weighted_eto:.6f}")
-
-#             if debug:
-#                 # print("\n--- Normalized Weights ---")
-#                 # print(nearest_data[['distance', 'weight', 'weighted_ETo','source','Date']])
-#                 print("Sum of Normalized Weights:", np.sum(normalized_weights))  # Should be 1
-            
-#             nearest_data['ETo__in'] = nearest_data['weighted_ETo']
-            
-#             # Check sum before normalization
-#             # print("\nSum of Weights Before Normalization:", nearest_data['weight'].sum())
-#             # Print debug information
-#             print("\nNearest Stations:")
-#             # print(nearest_data[['distance', 'weight', 'ETo__in', 'weighted_ETo']])
-
-#             # Compute final weighted ETo
-#             weighted_avg_eto = nearest_data['weighted_ETo'].sum()
-#             # print(f"\nFinal Weighted ETo: {weighted_avg_eto:.5f}")
-
+        # Combine valid values across all sources, filtering None
+        resultDict = {}
 
             
+        if region == 'USA-!CA':    
             
-#             # Compute final weighted ETo
-            
-#             # print(f"\nFinal Weighted ETo: {weighted_avg_eto:.5f}")
-#             # Compute station-weighted ETo
-#             # station_weighted_eto = weighted_avg_eto
-#             # # Get region-level weights
-#             # region_info = REGION_CONFIG.get(region, REGION_CONFIG['AUS'])  # Default to 'OTHER' config
-#             # # print(f'region_info--{region_info}')
-#             # region_sources = region_info['sources'][0]
-#             # # print(f'region_sources--{region_sources}')
-#             # region_weights = region_info['weights']
-#             # # Get weight for this source from REGION_CONFIG
-#             # source_weight = region_weights[region_sources.index(source)]
-#             # final_eto = station_weighted_eto * source_weight
-#             # print(f'final_eto--{final_eto}')
-
-#             # print(nearest_data['ETo__in'])
-#             # dist_values = distances.iloc[nearest_idx].values
-#             # weights = 1/(dist_values + 1e-6)  # Inverse distance weighting
-#             # weights /= weights.sum()  # Normalize to sum=1
-
-#             # Print station points (lat, lon) for the nearest stations
-#             # Print station details with weights
-#         #     print(f"\n--- {source} source weights for {current_date.date()} ---")
-#         #     print(f"Geoid centroid: {geoid_lat:.4f}, {geoid_lon:.4f}")
-#         #     for i, idx in enumerate(nearest_idx):
-#         #         station = processed_df.iloc[idx]
-#         #         distance_km = distances.iloc[idx] * 111  # 1 degree ≈ 111 km
-#         #         print(f"Station {i+1}:")
-#         #         print(f"  Coordinates: {station[lat_col]:.4f}, {station[lon_col]:.4f}")
-#         #         print(f"  Distance: {distance_km:.2f} km")
-#         #         print(f"  Weight: {weights[i]:.4f}")
-#         #         print(f"  Contributing values:")
-#         #         for col in required_columns:
-#         #             print(f"    {col}: {station[col]:.2f}")    
-#             source_records.extend(processed_df.to_dict('records'))
-
-#         if not source_records:
-#             return None
-
-#         # Convert to DataFrame for easier processing
-#         source_df = pd.DataFrame(source_records)
-        
-#         # Combine valid values across all sources, filtering None
-#         resultDict = {}
-
-            
-#         if region == 'USA-!CA':    
-            
-#             for items in source_records:
-#                 if items['source'] == 'GHCND':
-#                     resultDict['Wavg']=items.get('AWND')
-#                     if 'ETo__in' in items:
-#                         resultDict['ETo__in'] = items['ETo__in']
-#                 # Check source type and assign values accordingly
-#                 if items['source'] == 'NCEP':
-#                     if 'Rnet' in items:
-#                         resultDict['Rnet'] = items['Rnet']
-#                 if items['source'] == 'NOAA':
-#                     if 'Tavg' in items:
-#                         resultDict['Tavg'] = items['Tavg']
-#                 elif items['source'] == 'NOAA-FORECAST':
-#                     if 'Wavg' in items:
-#                         resultDict['Wavg'] = items['Wavg']
-#                     if 'Rnet' in items:
-#                         resultDict['Rnet'] = items['Rnet']
-#                 elif source != 'NOAA-FORECAST' and source == 'CIMIS':
-#                     resultDict['Wavg'] = items['Wavg']
+            for items in source_records:
+                if items['source'] == 'GHCND':
+                    resultDict['Wavg']=items.get('AWND')
+                    if 'ETo__in' in items:
+                        resultDict['ETo__in'] = items['ETo__in']
+                # Check source type and assign values accordingly
+                if items['source'] == 'NCEP':
+                    if 'Rnet' in items:
+                        resultDict['Rnet'] = items['Rnet']
+                if items['source'] == 'NOAA':
+                    if 'Tavg' in items:
+                        resultDict['Tavg'] = items['Tavg']
+                elif items['source'] == 'NOAA-FORECAST':
+                    if 'Wavg' in items:
+                        resultDict['Wavg'] = items['Wavg']
+                        
+                elif source == 'ERRA5':
+                    resultDict['Wavg'] = items['Wavg']
+                    resultDict['Rnet'] = items['Rnet']
                     
-#                 # Ensure 'Date' key is always assigned, even if other keys are missing
-#                 if 'Date' in items:
-#                     resultDict['Date'] = items['Date']
+                    
+                # Ensure 'Date' key is always assigned, even if other keys are missing
+                if 'Date' in items:
+                    resultDict['Date'] = items['Date']
         
-#         elif region == 'AUS':
+        elif region == 'AUS':
                 
-#             for items in source_records:
+            for items in source_records:
 
                         
-#                 if items['source'] == 'AUS':
-#                     resultDict['ETo__in'] = items.get('ETo__in')
-#                     resultDict['Wavg'] = items['Wavg']
-#                     resultDict['Tavg'] = items['Tavg']
+                if items['source'] == 'AUS':
+                    resultDict['ETo__in'] = items.get('ETo__in')
+                    resultDict['Wavg'] = items['Wavg']
+                    resultDict['Tavg'] = items['Tavg']
                     
-#                 elif items['source'] == 'AUS-FORECASTED':
+                elif items['source'] == 'AUS-FORECASTED':
                     
-#                     resultDict['ETo__in'] = items['ETo__in']
-#                     resultDict['Rnet'] = items['Rnet']
-#                     resultDict['Tavg'] =  items['Tavg'] + 273.15 
+                    resultDict['ETo__in'] = items['ETo__in']
+                    resultDict['Rnet'] = items['Rnet']
+                    resultDict['Tavg'] =  items['Tavg']
                     
-#                 if items['ETo__in'] == 0 and  items['Wavg']:    
-#                     if items['source'] == 'GHCND':
-#                         resultDict['Wavg']=items.get('AWND')
+                if items['ETo__in'] == 0 and  items['Wavg']:    
+                    if items['source'] == 'GHCND':
+                        resultDict['Wavg']=items.get('AWND')
 
-#                 if 'Date' in items:
-#                     resultDict['Date'] = items['Date']
+                if 'Date' in items:
+                    resultDict['Date'] = items['Date']
+                    
+        elif region == 'OTHER':
+            for items in source_records:
+                if items['source'] == 'ERRA5':
+                    resultDict['ETo__in'] = items['ETo_AVG_IN']
+                    resultDict['Wavg'] = items['Wavg']
+                    resultDict['Tavg'] = items['T_mean']
+                    resultDict['Rnet'] = items['Rnet']
+                if 'Date' in items:
+                    resultDict['Date'] = items['Date']
                       
-#         return resultDict
+        return resultDict
     
-#     # Main processing flow
-#     unique_dates = df['Date'].unique()
-#     final_results = []
-#     with ThreadPoolExecutor() as executor:
-#         futures = [executor.submit(process_date, date) for date in unique_dates]
-#         for future in futures:
-#             result = future.result()
-#             if result:
-#                 final_results.append(result)
+    # Main processing flow
+    unique_dates = df['Date'].unique()
+    final_results = []
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_date, date) for date in unique_dates]
+        for future in futures:
+            result = future.result()
+            if result:
+                final_results.append(result)
 
-#     # Convert results to DataFrame if non-empty
-#     final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
+    # Convert results to DataFrame if non-empty
+    final_df = pd.DataFrame(final_results) if final_results else pd.DataFrame(columns=required_columns + ['Date'])
 
-#     return final_df.reset_index(drop=True)
+    return final_df.reset_index(drop=True)
 
 def reformat_datetime(df):
     """Reformat datetime to string (YYYY-MM-DD) and reset index"""
@@ -5653,33 +5634,45 @@ def reformat_datetime(df):
     df = df.set_index('Date')  # Set it back as the index
     return df
 
-def process_aus(source_df, source):
-    
+def process_aus(df, source):
     """Process AUS source data"""
-    aus_df = pd.DataFrame()
-    aus_df_forecast_df = pd.DataFrame()
-    ghcnd_df = pd.DataFrame()
+    aus_df = pd.DataFrame(index=df.index)
+    aus_df_forecast_df = pd.DataFrame(index=df.index)
+    ghcnd_df = pd.DataFrame(index=df.index)
+    erra5_df = pd.DataFrame(index=df.index)
 
     if source == "AUS":
-        aus_df['ETo__in'] = source_df['ETo_AVG_IN']
-        aus_df['Wavg'] = source_df['U_z']    
-        aus_df['Tavg'] = source_df['T_mean'] + 273.15  # Convert to Kelvin
-
+        aus_df['ETo__in'] = df['ETo_weighted']
+        aus_df['Wavg'] = df['U_z']
+        aus_df['Tavg'] = df['T_mean']  # Keep as Celsius
+    
     elif source == 'AUS-FORECASTED':
-        aus_df_forecast_df['Rnet'] =  source_df['R_n__MJpm2']
-        aus_df_forecast_df['Tavg'] =  source_df['T_mean'] + 273.15 
-        aus_df_forecast_df['ETo__in'] =  source_df['ETo_average_inches']
-        
-    elif source =='GHCND':
-        ghcnd_df['Wavg'] = source_df['AWND']
-        ghcnd_df['ETo__in'] = source_df['ETo_AVG_IN']
-        
-    # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([aus_df, aus_df_forecast_df,ghcnd_df])
-    # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
-    available_columns = [col for col in required_columns if col in df_final.columns]
+        aus_df_forecast_df['Rnet'] = df['R_n__MJpm2']
+        aus_df_forecast_df['Tavg'] = df['T_mean']  # Keep as Celsius
+        aus_df_forecast_df['ETo__in'] = df['ETo_average_inches']
+
+    elif source == 'GHCND':
+        ghcnd_df['Wavg'] = df['AWND']
+        ghcnd_df['ETo__in'] = df['ETo_weighted']
+
+    if source == 'ERRA5':
+        erra5_df['Rnet_ERRA5'] = df['Rnet'] if 'Rnet' in df else None
+        erra5_df['Tavg_ERRA5'] = df['Tavg'] if 'Tavg' in df else None
+        erra5_df['Wavg_ERRA5'] = df['Wavg'] if 'Wavg' in df else None
+        erra5_df['ETo__in_ERRA5'] = df['ETo__in'] if 'ETo__in' in df else None
+
+    # Join DataFrames with renamed columns to prevent conflicts
+    df_final = df.join([aus_df, aus_df_forecast_df, ghcnd_df, erra5_df], how='left')
+
+    # Replace zero values with corresponding ERRA5 values where applicable
+    for col in ['Rnet', 'Tavg', 'Wavg', 'ETo__in']:
+        erra5_col = f"{col}_ERRA5"
+        if col in df_final.columns and erra5_col in df_final.columns and (df_final[col] == 0).any():
+            df_final[col] = df_final[col].mask(df_final[col] == 0, df_final[erra5_col])
+            df_final.drop(columns=[erra5_col], inplace=True, errors='ignore')
+
     return df_final
+
 
 def process_ncep(source_df):
     """Process NCEP source data"""
@@ -5695,104 +5688,111 @@ def process_ncep(source_df):
     return df
 
 def process_cimis_noaa(source_df):
-    """Process CIMIS, NOAA, and NCEP data for ETo, Tavg, and WindRun"""
+    """Process CIMIS, NOAA, and NCEP data for ETo, Tavg, WindRun, and Rnet"""
 
     # Get ETo from CIMIS (only if source is CIMIS)
-    cimis_eto = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyEto' in source_df.columns else None
+    cimis_eto = source_df.loc[source_df['source'] == 'CIMIS', 'HlyEto'] if 'HlyEto' in source_df.columns else None
+    noaa_eto = source_df.loc[source_df['source'] == 'NOAA', 'ETo_weighted'] if 'ETo_weighted' in source_df.columns else None
 
-    # Get ETo from NOAA (only if source is NOAA)
-    noaa_eto = source_df.loc[source_df['source'] == 'NOAA'] if 'ETo_AVG_IN' in source_df.columns else None
-
-    # Compute average ETo if both are present
+    # Compute average ETo if at least one exists
     eto_values = [t for t in [cimis_eto, noaa_eto] if t is not None]
     if eto_values:
         source_df['ETo__in'] = sum(eto_values) / len(eto_values)
 
     # Get T_mean from each source
-    tavg_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'T_mean' in source_df.columns else None
-    tavg_noaa = source_df.loc[source_df['source'] == 'NOAA'] if 'T_mean' in source_df.columns else None
-    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP'] if 'T_mean' in source_df.columns else None
+    tavg_cimis = source_df.loc[source_df['source'] == 'CIMIS', 'T_mean'] if 'T_mean' in source_df.columns else None
+    tavg_noaa = source_df.loc[source_df['source'] == 'NOAA', 'T_mean'] if 'T_mean' in source_df.columns else None
+    tavg_ncep = source_df.loc[source_df['source'] == 'NCEP', 'T_mean'] if 'T_mean' in source_df.columns else None
 
     # Compute average T_mean if at least one exists
     tavg_values = [t for t in [tavg_cimis, tavg_noaa, tavg_ncep] if t is not None]
     if tavg_values:
         source_df['Tavg'] = sum(tavg_values) / len(tavg_values)
 
-    # Get WindRun from NCEP and CIMIS (with correct source filtering)
-    ncep_windrun = source_df.loc[source_df['source'] == 'NCEP'] if 'GUST_surface' in source_df.columns else None
-    cimis_windrun = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyWindSpd' in source_df.columns else None
+    # Get WindRun from NCEP and CIMIS
+    ncep_windrun = source_df.loc[source_df['source'] == 'NCEP', 'GUST_surface'] if 'GUST_surface' in source_df.columns else None
+    cimis_windrun = source_df.loc[source_df['source'] == 'CIMIS', 'HlyWindSpd'] if 'HlyWindSpd' in source_df.columns else None
 
     # Compute WindRun average
     wind_values = [w for w in [ncep_windrun, cimis_windrun] if w is not None]
     if wind_values:
         source_df['Wavg'] = sum(wind_values) / len(wind_values)
-    
-    Rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS'] if 'HlyNetRad' in source_df.columns else None
-    if source_df['source'].any() == 'NCEP' or source_df['source'].any() == 'NLDAS':
-        ncep_Rnet = getRnet(source_df)
-        # ncep_Rnet = ncep_source_df['R_net']
-        
-        # Compute WindRun average
-    r_net_values = [w for w in [Rnet_cimis, ncep_Rnet] if w is not None]
 
-    if wind_values:
+    # Get Rnet from CIMIS and NCEP/NLDAS
+    Rnet_cimis = source_df.loc[source_df['source'] == 'CIMIS', 'HlyNetRad'] if 'HlyNetRad' in source_df.columns else None
+    ncep_Rnet = getRnet(source_df) if source_df['source'].isin(['NCEP', 'NLDAS']).any() else None
+
+    r_net_values = [r for r in [Rnet_cimis, ncep_Rnet] if r is not None]
+    if r_net_values:
         source_df['Rnet'] = sum(r_net_values) / len(r_net_values)
-    
+
+    # Replace zero values with corresponding ERRA5 values where applicable
+    for col in ['ETo__in', 'Tavg', 'Wavg', 'Rnet']:
+        erra5_col = f"{col}_ERRA5"
+        if col in source_df.columns and erra5_col in source_df.columns:
+            source_df[col] = source_df[col].mask(source_df[col] == 0, source_df[erra5_col])
+            source_df.drop(columns=[erra5_col], inplace=True, errors='ignore')
+
     return source_df
+
 
 def process_noaa_ghcnd(source_df, source):
     """Process NOAA and GHCND data"""
     df = source_df.copy()
-    ghcnd_df = pd.DataFrame()
-    noaa_df = pd.DataFrame()
-    noaa_forecast_df = pd.DataFrame()
-    cimis_df = pd.DataFrame()
+
+    ghcnd_df = pd.DataFrame(index=df.index)
+    noaa_df = pd.DataFrame(index=df.index)
+    noaa_forecast_df = pd.DataFrame(index=df.index)
+    cimis_df = pd.DataFrame(index=df.index)
+    erra5_df = pd.DataFrame(index=df.index)
+
     # Process based on source
     if source == 'GHCND':
-        ghcnd_df['ETo__in'] = df['ETo_AVG_IN']
-        
-    # Process for NOAA source
-    if source == 'NOAA':
-        noaa_df['Tavg'] = df['T_mean']
-        # noaa_df['ETo__in'] = df['ETo_AVG_IN']  # Ensure ETo is assigned
-
-    # Process for NOAA-FORECAST source
-    if source == 'NOAA-FORECAST':
-        noaa_forecast_df['Wavg'] = df['U_z']
-        noaa_forecast_df['Rnet'] = df['R_n__MJpm2']
-        
-    elif source != 'NOAA-FORECAST' and source == 'CIMIS':
-        cimis_df['Wavg'] = df['HlyWindSpd']
-        
-    elif source != 'NOAA-FORECAST' and source == 'GHCND':
+        ghcnd_df['ETo__in'] = df['ETo_weighted']
         ghcnd_df['Wavg'] = df['AWND']
 
-    # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([ghcnd_df, noaa_df, noaa_forecast_df , cimis_df])
-    
-    # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
-    available_columns = [col for col in required_columns if col in df_final.columns]
-    
+    if source == 'NOAA':
+        noaa_df['Tavg'] = df['T_mean']
+
+    if source == 'NOAA-FORECAST':
+        noaa_forecast_df['Wavg'] = df['U_z']
+        noaa_forecast_df['Rnet_NOAA'] = df['R_n__MJpm2']  # Rename to prevent conflict
+
+    if source == 'CIMIS':
+        cimis_df['Wavg'] = df['HlyWindSpd']
+        cimis_df['Rnet'] = df['HlyNetRad']  # Rename to prevent conflict
+
+    if source == 'ERRA5':
+        erra5_df['Rnet_ERRA5'] = df['Rnet']  # Rename to prevent conflict
+        erra5_df['Tavg_ERRA5'] = df['Tavg'] if 'Tavg' in df else None
+        erra5_df['Wavg_ERRA5'] = df['Wavg'] if 'Wavg' in df else None
+        erra5_df['ETo__in_ERRA5'] = df['ETo_weighted'] if 'ETo_weighted' in df else None
+
+    # Join DataFrames with renamed columns to prevent conflicts
+    df_final = df.join([ghcnd_df, noaa_df, noaa_forecast_df, cimis_df, erra5_df], how='left')
+
+    # Replace zero values with corresponding ERRA5 values where applicable
+    for col in ['Rnet', 'Tavg', 'Wavg', 'ETo__in']:
+        erra5_col = f"{col}_ERRA5"
+        if col in df_final.columns and erra5_col in df_final.columns and (df_final[col] == 0).any():
+            df_final[col] = df_final[col].mask(df_final[col] == 0, df_final[erra5_col])
+            df_final.drop(columns=[erra5_col], inplace=True, errors='ignore')
+
     return df_final
 
 
-def process_erra5(source_df,source):
+
+def process_erra5(source_df, source):
  
-    err5_df = pd.DatFrame()
-    if source =='ERRA5':    
-        err5_df['ETo__in'] = source_df['ETo_AVG_IN']
+    err5_df = pd.DataFrame()
+    if source == 'ERRA5':    
+        err5_df['ETo__in'] = source_df['ETo_weighted']
         err5_df['Wavg'] = source_df['Wavg']
         err5_df['Tavg'] = source_df['T_mean']
-        err5_df['Rnet'] = source_df['R_n']
+        err5_df['Rnet'] = source_df['Rnet']
         
-        # Join all dataframes (adjust if you need to join based on specific keys)
-    df_final = source_df.join([err5_df])
-    
-    # Check if the required columns exist before printing
-    required_columns = ['ETo__in', 'Wavg', 'Tavg', 'Rnet']
-    available_columns = [col for col in required_columns if col in df_final.columns]
-        
+    df_final = pd.concat([source_df, err5_df], axis=1)
+
     return df_final
         
 def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.DataFrame:
@@ -5826,7 +5826,7 @@ def getWeatherForDates(geoid: str, start_date: str, end_date: str = None) -> pd.
                 continue
 
             df['source'] = source
-            print(f"Added source for {source}: {df['source'].unique()}")
+            # print(f"Added source for {source}: {df['source'].unique()}")
 
             processed_df = getWeatherForGeoid(df, geoid)
             processed_df['source'] = source
@@ -5995,8 +5995,6 @@ def getWeatherFromERA5(agstack_geoid, start_date,end_date):
             raise Exception(f"Open-Meteo API request failed! HTTP Code: {response.status_code}")
 
         data = response.json()
-
-        print(data)
         # print(data)
         # Ensure the response contains the expected data
         if "daily" not in data:
@@ -6135,316 +6133,316 @@ def get_historical_crop_data(lat: str, lng: str, forYear: int):
 
 # Soil Properties
 property_dict = {
-	'bdod': 'Bulk density of the fine earth fraction',
-	'cec': 'Cation Exchange Capacity of the soil',
-	'cfvo': 'Volumetric fraction of coarse fragments (> 2 mm)',
-	'clay': 'Proportion of clay particles (< 0.002 mm) in the fine earth fraction',
-	'sand': 'Proportion of sand particles (> 0.05 mm) in the fine earth fraction',
-	'silt': 'Proportion of silt particles (≥ 0.002 mm and ≤ 0.05 mm) in the fine earth fraction',
-	'nitrogen': 'Total nitrogen (N)', 
-	'ocd': 'Organic carbon density',
-	'ocs': 'Organic carbon stocks',
-	'phh2o': 'Soil pH',
-	'soc': 'Soil organic carbon content in the fine earth fraction'
+    'bdod': 'Bulk density of the fine earth fraction',
+    'cec': 'Cation Exchange Capacity of the soil',
+    'cfvo': 'Volumetric fraction of coarse fragments (> 2 mm)',
+    'clay': 'Proportion of clay particles (< 0.002 mm) in the fine earth fraction',
+    'sand': 'Proportion of sand particles (> 0.05 mm) in the fine earth fraction',
+    'silt': 'Proportion of silt particles (≥ 0.002 mm and ≤ 0.05 mm) in the fine earth fraction',
+    'nitrogen': 'Total nitrogen (N)', 
+    'ocd': 'Organic carbon density',
+    'ocs': 'Organic carbon stocks',
+    'phh2o': 'Soil pH',
+    'soc': 'Soil organic carbon content in the fine earth fraction'
 }
 
 
 def getSoilPropertiesDF(propertyCodeStr, data):
-	
-	allDepth_df = pd.DataFrame()
+    
+    allDepth_df = pd.DataFrame()
 
-	#first get the subset by name
-	for i in range(len(data['properties']['layers'])):
-		propName = data['properties']['layers'][i]['name']
-		if (propName==propertyCodeStr):
-			
-			#get the unit measure
-			um = data['properties']['layers'][i]['unit_measure']
-			fac = um['d_factor']
-			unitStr_target = um['target_units']
-			unitStr_mapped = um['mapped_units']
-			
-			
-			data_code = data['properties']['layers'][i]
-			num_depths = len(data_code['depths'])
-			for d in range(num_depths):
-				data_at_depth = data_code['depths'][d]
-				row_label = data_at_depth['label']
-				vals = data_at_depth['values']
-				rng = data_at_depth['range']
-				
-				top_depth = rng['top_depth']
-				bottom_depth = rng['bottom_depth']
-				unit_depth = rng['unit_depth']
-				
-				df = pd.DataFrame(list(vals.values())).T
-				df = df / fac
-				
-				df.columns = list(vals.keys())
-				cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
-				
-				df['Depth'] = row_label
-				df['Top_Depth'] = top_depth
-				df['Botton_Depth'] = bottom_depth
-				df['Units_Depth'] = unit_depth
-				
-				df = df[cols]
-				allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
-				#allDepth_df = allDepth_df.append(df, ignore_index=True)
-		else:
-			continue
-	
-	return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], allDepth_df
+    #first get the subset by name
+    for i in range(len(data['properties']['layers'])):
+        propName = data['properties']['layers'][i]['name']
+        if (propName==propertyCodeStr):
+            
+            #get the unit measure
+            um = data['properties']['layers'][i]['unit_measure']
+            fac = um['d_factor']
+            unitStr_target = um['target_units']
+            unitStr_mapped = um['mapped_units']
+            
+            
+            data_code = data['properties']['layers'][i]
+            num_depths = len(data_code['depths'])
+            for d in range(num_depths):
+                data_at_depth = data_code['depths'][d]
+                row_label = data_at_depth['label']
+                vals = data_at_depth['values']
+                rng = data_at_depth['range']
+                
+                top_depth = rng['top_depth']
+                bottom_depth = rng['bottom_depth']
+                unit_depth = rng['unit_depth']
+                
+                df = pd.DataFrame(list(vals.values())).T
+                df = df / fac
+                
+                df.columns = list(vals.keys())
+                cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
+                
+                df['Depth'] = row_label
+                df['Top_Depth'] = top_depth
+                df['Botton_Depth'] = bottom_depth
+                df['Units_Depth'] = unit_depth
+                
+                df = df[cols]
+                allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
+                #allDepth_df = allDepth_df.append(df, ignore_index=True)
+        else:
+            continue
+    
+    return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], allDepth_df
 
 
 def getSoilPropertiesDF2(propertyCodeStr, data):
-	
-	allDepth_df = pd.DataFrame()
+    
+    allDepth_df = pd.DataFrame()
 
-	#first get the subset by name
-	for i in range(len(data['properties']['layers'])):
-		propName = data['properties']['layers'][i]['name']
-		if (propName==propertyCodeStr):
-			
-			#get the unit measure
-			um = data['properties']['layers'][i]['unit_measure']
-			fac = um['d_factor']
-			unitStr_target = um['target_units']
-			unitStr_mapped = um['mapped_units']
-			
-			
-			data_code = data['properties']['layers'][i]
-			num_depths = len(data_code['depths'])
-			for d in range(num_depths):
-				data_at_depth = data_code['depths'][d]
-				row_label = data_at_depth['label']
-				vals = data_at_depth['values']
-				rng = data_at_depth['range']
-				
-				top_depth = rng['top_depth']
-				bottom_depth = rng['bottom_depth']
-				unit_depth = rng['unit_depth']
-				
-				df = pd.DataFrame(list(vals.values())).T
-				df = df / fac
-				
-				df.columns = list(vals.keys())
-				cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
-				
-				df['Depth'] = row_label
-				df['Top_Depth'] = top_depth
-				df['Botton_Depth'] = bottom_depth
-				df['Units_Depth'] = unit_depth
-				
-				df = df[cols]
-				allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
-				#allDepth_df = allDepth_df.append(df, ignore_index=True)
-		else:
-			continue
-	
-	#fix the allDepth_df
-	df = allDepth_df[['Depth','mean']]
-	df = df.rename(columns={'mean':propertyCodeStr})
-	df = df.drop(columns=['Depth'], axis=1)
-	
-	return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], df
+    #first get the subset by name
+    for i in range(len(data['properties']['layers'])):
+        propName = data['properties']['layers'][i]['name']
+        if (propName==propertyCodeStr):
+            
+            #get the unit measure
+            um = data['properties']['layers'][i]['unit_measure']
+            fac = um['d_factor']
+            unitStr_target = um['target_units']
+            unitStr_mapped = um['mapped_units']
+            
+            
+            data_code = data['properties']['layers'][i]
+            num_depths = len(data_code['depths'])
+            for d in range(num_depths):
+                data_at_depth = data_code['depths'][d]
+                row_label = data_at_depth['label']
+                vals = data_at_depth['values']
+                rng = data_at_depth['range']
+                
+                top_depth = rng['top_depth']
+                bottom_depth = rng['bottom_depth']
+                unit_depth = rng['unit_depth']
+                
+                df = pd.DataFrame(list(vals.values())).T
+                df = df / fac
+                
+                df.columns = list(vals.keys())
+                cols = ['Depth'] + ['Top_Depth', 'Botton_Depth', 'Units_Depth'] + df.columns.tolist()
+                
+                df['Depth'] = row_label
+                df['Top_Depth'] = top_depth
+                df['Botton_Depth'] = bottom_depth
+                df['Units_Depth'] = unit_depth
+                
+                df = df[cols]
+                allDepth_df = pd.concat([allDepth_df, df], ignore_index=True)
+                #allDepth_df = allDepth_df.append(df, ignore_index=True)
+        else:
+            continue
+    
+    #fix the allDepth_df
+    df = allDepth_df[['Depth','mean']]
+    df = df.rename(columns={'mean':propertyCodeStr})
+    df = df.drop(columns=['Depth'], axis=1)
+    
+    return [unitStr_mapped, fac, unitStr_target, propertyCodeStr, property_dict[propertyCodeStr]], df
 
 
 def getKsatMean(silt, sand, clay, BD):
-	#, OC, PD, MC):
-	#PD = Particle density
-	#MC = Moisture Content
-	#https://www.researchgate.net/figure/Saturated-hydraulic-conductivity-of-soil-as-influenced-by-per-cent-silt-th-clay-content-in_fig2_248885151
+    #, OC, PD, MC):
+    #PD = Particle density
+    #MC = Moisture Content
+    #https://www.researchgate.net/figure/Saturated-hydraulic-conductivity-of-soil-as-influenced-by-per-cent-silt-th-clay-content-in_fig2_248885151
 
-	#https://www.tandfonline.com/doi/full/10.1080/24749508.2018.1481633
-	#EIR = -30,578.81–305.56(sand%)-306.16(silt%)-0.306.33(clay%)-5.18(BD%)+.34(MC%)+4.18(PD)+16.85(OC%)
+    #https://www.tandfonline.com/doi/full/10.1080/24749508.2018.1481633
+    #EIR = -30,578.81–305.56(sand%)-306.16(silt%)-0.306.33(clay%)-5.18(BD%)+.34(MC%)+4.18(PD)+16.85(OC%)
 
-	#https://essd.copernicus.org/preprints/essd-2020-149/essd-2020-149.pdf
-	#log(Ksat) = b0 + b1 · BD + b2 · BD2 + b3 · CL + b4 · BD · CL + b5 · CL2 + b6 · SA + b7 · BD · SA + b8 · CL · SA + b9 · SA2
-	if not silt.index.name=='Depth':
-		silt.set_index('Depth', drop=True, inplace=True)
-	
-	silt = silt[['mean']]
-	silt = silt.astype('float')
+    #https://essd.copernicus.org/preprints/essd-2020-149/essd-2020-149.pdf
+    #log(Ksat) = b0 + b1 · BD + b2 · BD2 + b3 · CL + b4 · BD · CL + b5 · CL2 + b6 · SA + b7 · BD · SA + b8 · CL · SA + b9 · SA2
+    if not silt.index.name=='Depth':
+        silt.set_index('Depth', drop=True, inplace=True)
+    
+    silt = silt[['mean']]
+    silt = silt.astype('float')
 
-	if not clay.index.name=='Depth':
-		clay.set_index('Depth', drop=True, inplace=True)
-	clay = clay[['mean']]
-	clay = clay.astype('float')
+    if not clay.index.name=='Depth':
+        clay.set_index('Depth', drop=True, inplace=True)
+    clay = clay[['mean']]
+    clay = clay.astype('float')
 
-	if not sand.index.name=='Depth':
-		sand.set_index('Depth', drop=True, inplace=True)
-	sand = sand[['mean']]
-	sand = sand.astype('float')
+    if not sand.index.name=='Depth':
+        sand.set_index('Depth', drop=True, inplace=True)
+    sand = sand[['mean']]
+    sand = sand.astype('float')
 
-	if not BD.index.name=='Depth':
-		BD.set_index('Depth', drop=True, inplace=True)
-	BD = BD[['mean']]
-	BD = BD.astype('float')
+    if not BD.index.name=='Depth':
+        BD.set_index('Depth', drop=True, inplace=True)
+    BD = BD[['mean']]
+    BD = BD.astype('float')
 
-	b0=2.17
-	b1=0.9387
-	b2=-0.8026
-	b3=0.0037
-	b4=-0.017
-	b5=0
-	b6=0.0025
-	b7=0
-	b8=0
-	b9=0
-	#Ksat is in cm/day, clay (CL) and sand (SA) are expressed in % and bulk density (BD) is in g/cm3 or kg/dm3
-	log_Ksat = b0 + b1*BD + b2*BD.pow(2) + b3*clay + b4*BD*clay + b5*clay.pow(2) + b6*sand + b7*BD*sand + b8*clay*sand + b9*sand.pow(2)
-	log_Ksat = log_Ksat[['mean']]
-	Ksat = log_Ksat.apply(lambda x: np.exp(x))
-	Ksat.rename(columns = {'mean':'Ksat'}, inplace=True)
-	units = 'cm/day'
-	
-	#Convert to inches / hr
-	Ksat_inchesPerHr = Ksat * 0.0164042
-	units_inchesPerHr = 'in/hr'
+    b0=2.17
+    b1=0.9387
+    b2=-0.8026
+    b3=0.0037
+    b4=-0.017
+    b5=0
+    b6=0.0025
+    b7=0
+    b8=0
+    b9=0
+    #Ksat is in cm/day, clay (CL) and sand (SA) are expressed in % and bulk density (BD) is in g/cm3 or kg/dm3
+    log_Ksat = b0 + b1*BD + b2*BD.pow(2) + b3*clay + b4*BD*clay + b5*clay.pow(2) + b6*sand + b7*BD*sand + b8*clay*sand + b9*sand.pow(2)
+    log_Ksat = log_Ksat[['mean']]
+    Ksat = log_Ksat.apply(lambda x: np.exp(x))
+    Ksat.rename(columns = {'mean':'Ksat'}, inplace=True)
+    units = 'cm/day'
+    
+    #Convert to inches / hr
+    Ksat_inchesPerHr = Ksat * 0.0164042
+    units_inchesPerHr = 'in/hr'
 
-	return units_inchesPerHr, Ksat_inchesPerHr, 'Saturated hydraulic conductivity'
+    return units_inchesPerHr, Ksat_inchesPerHr, 'Saturated hydraulic conductivity'
 
 def getAWCMean(silt, clay, BD):
-	#https://journals.lww.com/soilsci/Abstract/1985/07000/Estimating_Available_Water_Holding_Capacity_of.7.aspx#:~:text=Available%20water%2Dstorage%20capacity%20(AWSC,(r2%20%3D%200.92)%3A%20AWSCcore%20%3D
-	if not silt.index.name=='Depth':
-		silt.set_index('Depth', drop=True, inplace=True)
-	silt = silt[['mean']]
-	silt = silt.astype('float')
-	
-	if not clay.index.name=='Depth':
-		clay.set_index('Depth', drop=True, inplace=True)
-	clay = clay[['mean']]
-	clay = clay.astype('float')
-	
-	if not BD.index.name=='Depth':
-		BD.set_index('Depth', drop=True, inplace=True)
-	BD = BD[['mean']]
-	BD = BD.astype('float')
-	
-	AWSC = 14.01 + 0.03*(silt * clay) - 8.78*BD
-	AWSC.rename(columns={'mean':'AWSC'}, inplace=True)
-	AWSC = AWSC.round(2)
-	#units are %Volume
-	unitsStr = '%vol [volume-fraction]'
-	
-	return unitsStr, AWSC, 'Available water holding capacity'
+    #https://journals.lww.com/soilsci/Abstract/1985/07000/Estimating_Available_Water_Holding_Capacity_of.7.aspx#:~:text=Available%20water%2Dstorage%20capacity%20(AWSC,(r2%20%3D%200.92)%3A%20AWSCcore%20%3D
+    if not silt.index.name=='Depth':
+        silt.set_index('Depth', drop=True, inplace=True)
+    silt = silt[['mean']]
+    silt = silt.astype('float')
+    
+    if not clay.index.name=='Depth':
+        clay.set_index('Depth', drop=True, inplace=True)
+    clay = clay[['mean']]
+    clay = clay.astype('float')
+    
+    if not BD.index.name=='Depth':
+        BD.set_index('Depth', drop=True, inplace=True)
+    BD = BD[['mean']]
+    BD = BD.astype('float')
+    
+    AWSC = 14.01 + 0.03*(silt * clay) - 8.78*BD
+    AWSC.rename(columns={'mean':'AWSC'}, inplace=True)
+    AWSC = AWSC.round(2)
+    #units are %Volume
+    unitsStr = '%vol [volume-fraction]'
+    
+    return unitsStr, AWSC, 'Available water holding capacity'
 
 
 def getPropertiesDF(lat,lon):
-	
-	#API call for the details about a point
-	"""
-	Query a single pixel point on the soilgrids stack, returning a GeoJSON
-	layer: soilgrids layer name to be queried
-	depth: specific depth to be queried
-	values: statistical values Optional[List] = LayerQuery
-	"""
-	
-	#API #2 is meta data
-	url_layers = 'https://rest.isric.org/soilgrids/v2.0/properties/layers'
-	with urllib.request.urlopen(url_layers) as response:
-		layer_data = json.load(response)
-	#get the list of properties
-	propertiesList = []
-	length = len(layer_data['layers'])
-	for idx in range(length):
-		p = layer_data['layers'][idx]['property']
-		propertiesList.append(p)
-	
-	
-	#to get the meta data for any property
-	depths=[]
-	values = []
-	#modify the property list
-	propertiesList = ['bdod',
-	 'cec',
-	 'cfvo',
-	 'soc',
-	 'nitrogen',
-	 'ocd',
-	 'phh2o',
-	 'clay',
-	 'sand',
-	 'silt']
-	
-	prop_to_find = 'nitrogen'
-	for idx in range(length):
-		p = layer_data['layers'][idx]['property']
-		if (p==prop_to_find):
-			info = layer_data['layers'][idx]['layer_structure']
-			for i in range(len(info)):
-				depths.append(info[i]['range'])
-				values.append(info[i]['values'])
-	valuesList = values[1]
-	prop_url = ''
-	for p in propertiesList:
-		prop_url = prop_url + '&property='+str(p)
+    
+    #API call for the details about a point
+    """
+    Query a single pixel point on the soilgrids stack, returning a GeoJSON
+    layer: soilgrids layer name to be queried
+    depth: specific depth to be queried
+    values: statistical values Optional[List] = LayerQuery
+    """
+    
+    #API #2 is meta data
+    url_layers = 'https://rest.isric.org/soilgrids/v2.0/properties/layers'
+    with urllib.request.urlopen(url_layers) as response:
+        layer_data = json.load(response)
+    #get the list of properties
+    propertiesList = []
+    length = len(layer_data['layers'])
+    for idx in range(length):
+        p = layer_data['layers'][idx]['property']
+        propertiesList.append(p)
+    
+    
+    #to get the meta data for any property
+    depths=[]
+    values = []
+    #modify the property list
+    propertiesList = ['bdod',
+     'cec',
+     'cfvo',
+     'soc',
+     'nitrogen',
+     'ocd',
+     'phh2o',
+     'clay',
+     'sand',
+     'silt']
+    
+    prop_to_find = 'nitrogen'
+    for idx in range(length):
+        p = layer_data['layers'][idx]['property']
+        if (p==prop_to_find):
+            info = layer_data['layers'][idx]['layer_structure']
+            for i in range(len(info)):
+                depths.append(info[i]['range'])
+                values.append(info[i]['values'])
+    valuesList = values[1]
+    prop_url = ''
+    for p in propertiesList:
+        prop_url = prop_url + '&property='+str(p)
 
-	value_url = ''
-	valuesList=['mean']
-	for v in valuesList:
-		value_url = value_url + '&value='+str(v)
+    value_url = ''
+    valuesList=['mean']
+    for v in valuesList:
+        value_url = value_url + '&value='+str(v)
 
-	depth_url = ''
-	depths=['0-5cm']
-	for d in depths:
-		depth_url = depth_url + '&depth='+str(d)
+    depth_url = ''
+    depths=['0-5cm']
+    for d in depths:
+        depth_url = depth_url + '&depth='+str(d)
 
-	main_url = 'https://rest.isric.org/soilgrids/v2.0/properties/query?' + 'lon='+str(lon)+'&lat='+str(lat)
-	url_details = main_url + prop_url + depth_url + value_url
-	with urllib.request.urlopen(url_details) as response:
-		data = json.load(response) 
+    main_url = 'https://rest.isric.org/soilgrids/v2.0/properties/query?' + 'lon='+str(lon)+'&lat='+str(lat)
+    url_details = main_url + prop_url + depth_url + value_url
+    with urllib.request.urlopen(url_details) as response:
+        data = json.load(response) 
 
-	
+    
 
-	propertyResult = pd.DataFrame()
-	i=0
-	for p in propertiesList:
-		prop_mean_value = getSoilPropertiesDF2(p, data)[1].iloc[0][0]
-		prop_units = getSoilPropertiesDF2(p, data)[0][2]
-		prop_desc = getSoilPropertiesDF2(p, data)[0][4]
-		propertyResult.loc[i,'Name']=p
-		propertyResult.loc[i,'Mean Value in Top-Soil']=prop_mean_value
-		propertyResult.loc[i,'Units']=prop_units
-		propertyResult.loc[i,'Description']=prop_desc
-		i=i+1
+    propertyResult = pd.DataFrame()
+    i=0
+    for p in propertiesList:
+        prop_mean_value = getSoilPropertiesDF2(p, data)[1].iloc[0][0]
+        prop_units = getSoilPropertiesDF2(p, data)[0][2]
+        prop_desc = getSoilPropertiesDF2(p, data)[0][4]
+        propertyResult.loc[i,'Name']=p
+        propertyResult.loc[i,'Mean Value in Top-Soil']=prop_mean_value
+        propertyResult.loc[i,'Units']=prop_units
+        propertyResult.loc[i,'Description']=prop_desc
+        i=i+1
 
-	#Lets; do KSat
-	ksat_tuple = getKsatMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('sand', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
-	
-	nameStr = ksat_tuple[1].columns.tolist()[0]
-	valStr = ksat_tuple[1].iloc[0][0]
-	unitsStr = ksat_tuple[0]
-	descStr = ksat_tuple[2]
-	propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
+    #Lets; do KSat
+    ksat_tuple = getKsatMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('sand', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
+    
+    nameStr = ksat_tuple[1].columns.tolist()[0]
+    valStr = ksat_tuple[1].iloc[0][0]
+    unitsStr = ksat_tuple[0]
+    descStr = ksat_tuple[2]
+    propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
 
-	#Now let's do AWC
-	awc_tuple = getAWCMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
-	nameStr = awc_tuple[1].columns.tolist()[0]
-	valStr = awc_tuple[1].iloc[0][0]
-	unitsStr = awc_tuple[0]
-	descStr = awc_tuple[2]
-	propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
-	
-	renamedCols = ['Acronym', 'Mean Value in Top-Soil', 'Units', 'Property']
-	propertyResult.columns=renamedCols
-	subsetCols = ['Property', 'Mean Value in Top-Soil', 'Units']
-	propertyResult = propertyResult[subsetCols]
-	
-	#round to 2 decimal places for Mean Value
-	propertyResult['Mean Value in Top-Soil'] = propertyResult['Mean Value in Top-Soil'].round(2)
-	
-	return propertyResult
+    #Now let's do AWC
+    awc_tuple = getAWCMean(getSoilPropertiesDF('silt', data)[1], getSoilPropertiesDF('clay', data)[1], getSoilPropertiesDF('bdod', data)[1])
+    nameStr = awc_tuple[1].columns.tolist()[0]
+    valStr = awc_tuple[1].iloc[0][0]
+    unitsStr = awc_tuple[0]
+    descStr = awc_tuple[2]
+    propertyResult.loc[len(propertyResult.index)] = [nameStr, valStr, unitsStr, descStr]
+    
+    renamedCols = ['Acronym', 'Mean Value in Top-Soil', 'Units', 'Property']
+    propertyResult.columns=renamedCols
+    subsetCols = ['Property', 'Mean Value in Top-Soil', 'Units']
+    propertyResult = propertyResult[subsetCols]
+    
+    #round to 2 decimal places for Mean Value
+    propertyResult['Mean Value in Top-Soil'] = propertyResult['Mean Value in Top-Soil'].round(2)
+    
+    return propertyResult
 
 def getSoilProperties(geoid):
-	asset_registry_base = "https://api-ar.agstack.org"
-	res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
-	field_wkt = res['WKT']
-	p = shapely.wkt.loads(field_wkt)
-	c = p.centroid
-	df = getPropertiesDF(c.y,c.x)
-	return df
+    asset_registry_base = "https://api-ar.agstack.org"
+    res = requests.get(asset_registry_base +"/fetch-field-wkt/"+geoid).json()
+    field_wkt = res['WKT']
+    p = shapely.wkt.loads(field_wkt)
+    c = p.centroid
+    df = getPropertiesDF(c.y,c.x)
+    return df
 
     
 
